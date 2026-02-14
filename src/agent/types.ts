@@ -27,3 +27,24 @@ export interface ContextBuilderOptions {
  * Bootstrap file names
  */
 export const BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"];
+
+/**
+ * Inbound message from external source (bus, CLI, etc.)
+ */
+export interface InboundMessage {
+  channel: string;
+  senderId: string;
+  chatId: string;
+  content: string;
+  sessionKey?: string;
+  media?: string[];
+}
+
+/**
+ * Outbound message to external destination
+ */
+export interface OutboundMessage {
+  channel: string;
+  chatId: string;
+  content: string;
+}

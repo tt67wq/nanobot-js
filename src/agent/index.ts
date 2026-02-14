@@ -1,2 +1,3 @@
 export { ContextBuilder } from "./context";
-export type { IMemoryStore, ISkillsLoader, ContextBuilderOptions, BOOTSTRAP_FILES } from "./types";
+export { AgentLoop } from "./loop";
+export type { IMemoryStore, ISkillsLoader, ContextBuilderOptions, BOOTSTRAP_FILES, InboundMessage, OutboundMessage } from "./types";
