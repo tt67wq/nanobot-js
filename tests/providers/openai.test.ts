@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { OpenAIProvider } from "../../src/providers/openai";
-import type { ChatOptions, Tool } from "../../src/providers/base";
+import type { ChatOptions, ToolDefinition } from "../../src/providers/base";
 
 const API_KEY = process.env.OPENAI_API_KEY;
 const API_BASE = process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || null;
@@ -66,7 +66,7 @@ describe.skipIf(!API_KEY)("OpenAIProvider Integration Tests", () => {
   });
 
   describe("Tool Calling", () => {
-    const weatherTool: Tool = {
+    const weatherTool: ToolDefinition = {
       name: "get_weather",
       description: "Get the current weather for a location",
       parameters: {

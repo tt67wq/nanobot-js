@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll } from "bun:test";
 import { AnthropicProvider } from "../../src/providers/anthropic";
-import type { ChatOptions, Tool } from "../../src/providers/base";
+import type { ChatOptions, ToolDefinition } from "../../src/providers/base";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const API_BASE = process.env.ANTHROPIC_BASE_URL || null;
@@ -73,7 +73,7 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
   });
 
   describe("Tool Calling", () => {
-    const weatherTool: Tool = {
+    const weatherTool: ToolDefinition = {
       name: "get_weather",
       description: "Get the current weather for a location",
       parameters: {
