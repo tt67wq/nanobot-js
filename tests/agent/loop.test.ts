@@ -19,7 +19,7 @@ describe("AgentLoop", () => {
         usage: { promptTokens: 10, completionTokens: 5 }
       }),
       getDefaultModel: () => "test-model",
-      hasToolCalls: (response) => response.toolCalls.length > 0
+      hasToolCalls: (response: LLMResponse) => response.toolCalls.length > 0
     } as unknown as LLMProvider;
   });
 
@@ -42,7 +42,7 @@ describe("AgentLoop", () => {
   it("should use custom model when specified", async () => {
     const customProvider = {
       ...mockProvider,
-      chat: async (options: any) => {
+      chat: async (options: { model?: string; messages: any[]; tools?: any[] }) => {
         expect(options.model).toBe("custom-model");
         return {
           content: "Response",
