@@ -2,6 +2,7 @@ import { z } from "zod";
 import { homedir } from "os";
 import { join } from "path";
 
+// Feishu (飞书) configuration
 export const FeishuConfigSchema = z.object({
   enabled: z.boolean().default(false),
   app_id: z.string().default(""),
@@ -141,6 +142,7 @@ export class Config {
     this.mcp = parsed.mcp;
   }
 
+  // Expands ~ to home directory
   get workspacePath(): string {
     let workspace = this.agents.defaults.workspace;
     if (workspace.startsWith("~/")) {
