@@ -75,12 +75,20 @@ interface AnthropicResponse {
  *
  * Implements the LLMProvider interface for Anthropic's Claude models.
  */
+export type AuthType = "x-api-key" | "bearer";
+
 export class AnthropicProvider extends LLMProvider {
   protected defaultModel: string;
+  protected authType: AuthType;
 
-  constructor(apiKey: string | null = null, apiBase: string | null = null) {
+  constructor(
+    apiKey: string | null = null,
+    apiBase: string | null = null,
+    authType: AuthType = "x-api-key"
+  ) {
     super(apiKey, apiBase);
     this.defaultModel = "claude-sonnet-4-20250514";
+    this.authType = authType;
   }
 
   /**
@@ -136,7 +144,11 @@ export class AnthropicProvider extends LLMProvider {
     };
 
     if (this.apiKey) {
-      headers["x-api-key"] = this.apiKey;
+      if (this.authType === "bearer") {
+        headers["Authorization"] = `Bearer ${this.apiKey}`;
+      } else {
+        headers["x-api-key"] = this.apiKey;
+      }
     }
 
     const body: Record<string, unknown> = {

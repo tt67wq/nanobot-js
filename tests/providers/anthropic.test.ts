@@ -10,12 +10,14 @@ import { AnthropicProvider } from "../../src/providers/anthropic";
 import type { ChatOptions, Tool } from "../../src/providers/base";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
+const API_BASE = process.env.ANTHROPIC_BASE_URL || null;
+const MODEL = process.env.ANTHROPIC_MODEL || undefined;
 
 describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
   let provider: AnthropicProvider;
 
   beforeAll(() => {
-    provider = new AnthropicProvider(API_KEY!);
+    provider = new AnthropicProvider(API_KEY!, API_BASE || null);
   });
 
   describe("Basic Chat", () => {
@@ -24,6 +26,7 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
         messages: [
           { role: "user", content: "Say 'Hello, World!' in exactly those words." },
         ],
+        model: MODEL,
         maxTokens: 100,
         temperature: 0.7,
       };
@@ -40,7 +43,7 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
     it("should use custom model when specified", async () => {
       const options: ChatOptions = {
         messages: [{ role: "user", content: "What is 1+1?" }],
-        model: "claude-3-haiku-20240307",
+        model: MODEL || "claude-3-haiku-20240307",
         maxTokens: 50,
       };
 
@@ -58,13 +61,13 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
           { role: "system", content: "You are a helpful assistant that speaks in emojis." },
           { role: "user", content: "Say hello" },
         ],
+        model: MODEL,
         maxTokens: 50,
       };
 
       const response = await provider.chat(options);
 
       expect(response.content).toBeDefined();
-      // System message influence is subtle, just verify we got a response
       expect(response.content!.length).toBeGreaterThan(0);
     });
   });
@@ -91,6 +94,7 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
           { role: "user", content: "What's the weather in Tokyo?" },
         ],
         tools: [weatherTool],
+        model: MODEL,
         maxTokens: 500,
       };
 
@@ -115,13 +119,13 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
           { role: "user", content: "Thanks! Is it a good day for a walk?" },
         ],
         tools: [weatherTool],
+        model: MODEL,
         maxTokens: 200,
       };
 
       const response = await provider.chat(options);
 
       expect(response.content).toBeDefined();
-      // Response should reference the weather info
       expect(response.content!.toLowerCase()).toMatch(/22|sunny|good|walk/);
     });
   });
@@ -134,6 +138,7 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
           { role: "assistant", content: "Hello Alice! Nice to meet you." },
           { role: "user", content: "What's my name?" },
         ],
+        model: MODEL,
         maxTokens: 100,
       };
 
@@ -146,7 +151,7 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
 
   describe("Error Handling", () => {
     it("should handle invalid model gracefully", async () => {
-      const providerWithInvalidModel = new AnthropicProvider(API_KEY!);
+      const providerWithInvalidModel = new AnthropicProvider(API_KEY!, API_BASE || null);
 
       const options: ChatOptions = {
         messages: [{ role: "user", content: "Hello" }],
@@ -156,7 +161,6 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
 
       const response = await providerWithInvalidModel.chat(options);
 
-      // Should return error message in content
       expect(response.content).toContain("Error");
       expect(response.finishReason).toBe("error");
     });
@@ -164,9 +168,9 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
 
   describe("Temperature and MaxTokens", () => {
     it("should respect temperature parameter", async () => {
-      // With temperature 0, responses should be more deterministic
       const options: ChatOptions = {
         messages: [{ role: "user", content: "Say exactly: testing" }],
+        model: MODEL,
         temperature: 0,
         maxTokens: 20,
       };
@@ -180,19 +184,42 @@ describe.skipIf(!API_KEY)("AnthropicProvider Integration Tests", () => {
 });
 
 describe("AnthropicProvider Unit Tests (no API key required)", () => {
-  let provider: AnthropicProvider;
+  describe("Constructor", () => {
+    it("should create provider with apiKey and default apiBase", () => {
+      const provider = new AnthropicProvider("test-key");
+      expect(provider.getDefaultModel()).toBe("claude-sonnet-4-20250514");
+    });
 
-  beforeAll(() => {
-    provider = new AnthropicProvider("test-api-key");
+    it("should create provider with custom apiBase", () => {
+      const provider = new AnthropicProvider("test-key", "https://custom.api.com/v1");
+      expect(provider.getDefaultModel()).toBe("claude-sonnet-4-20250514");
+    });
+
+    it("should create provider with bearer authType", () => {
+      const provider = new AnthropicProvider("test-key", "https://custom.api.com/v1", "bearer");
+      expect(provider.getDefaultModel()).toBe("claude-sonnet-4-20250514");
+    });
+
+    it("should handle null apiBase", () => {
+      const provider = new AnthropicProvider("test-key", null);
+      expect(provider.getDefaultModel()).toBe("claude-sonnet-4-20250514");
+    });
   });
 
   describe("getDefaultModel", () => {
     it("should return the default model", () => {
+      const provider = new AnthropicProvider("test-api-key");
       expect(provider.getDefaultModel()).toBe("claude-sonnet-4-20250514");
     });
   });
 
   describe("hasToolCalls", () => {
+    let provider: AnthropicProvider;
+
+    beforeAll(() => {
+      provider = new AnthropicProvider("test-api-key");
+    });
+
     it("should correctly identify tool calls in response", () => {
       const responseWithTools = {
         content: "test",
@@ -211,5 +238,58 @@ describe("AnthropicProvider Unit Tests (no API key required)", () => {
       expect(provider.hasToolCalls(responseWithTools)).toBe(true);
       expect(provider.hasToolCalls(responseWithoutTools)).toBe(false);
     });
+  });
+});
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+
+describe.skipIf(!OPENROUTER_API_KEY)("AnthropicProvider Custom Base URL (OpenRouter)", () => {
+  let provider: AnthropicProvider;
+
+  beforeAll(() => {
+    provider = new AnthropicProvider(
+      OPENROUTER_API_KEY!,
+      "https://openrouter.ai/api/v1"
+    );
+  });
+
+  it("should work with custom base URL (OpenRouter)", async () => {
+    const options: ChatOptions = {
+      messages: [{ role: "user", content: "Say 'test passed' exactly" }],
+      model: "anthropic/claude-3-haiku-20240307",
+      maxTokens: 50,
+    };
+
+    const response = await provider.chat(options);
+
+    expect(response.content).toBeDefined();
+    expect(response.content).toMatch(/test passed/i);
+      expect(response.finishReason).toBe("stop");
+  });
+});
+
+describe.skipIf(!API_KEY)("AnthropicProvider Bearer Auth (DashScope/Minimax)", () => {
+  let provider: AnthropicProvider;
+
+  beforeAll(() => {
+    provider = new AnthropicProvider(
+      API_KEY!,
+      API_BASE || null,
+      "bearer"
+    );
+  });
+
+  it("should work with Bearer auth", async () => {
+    const options: ChatOptions = {
+      messages: [{ role: "user", content: "Say 'test passed' exactly" }],
+      model: MODEL || "qwen3-coder-plus",
+      maxTokens: 50,
+    };
+
+    const response = await provider.chat(options);
+
+    expect(response.content).toBeDefined();
+    expect(response.content).toMatch(/test passed/i);
+    expect(response.finishReason).toBe("stop");
   });
 });
