@@ -4,7 +4,7 @@
  * Supports OpenAI-compatible models including GPT, MiniMax, Azure OpenAI, etc.
  */
 
-import type { ChatOptions, LLMResponse, Tool, ToolCallRequest } from "./base";
+import type { ChatOptions, LLMResponse, Tool, ToolDefinition, ToolCallRequest } from "./base";
 import { LLMProvider } from "./base";
 
 /**
@@ -127,7 +127,7 @@ export class OpenAIProvider extends LLMProvider {
     model: string;
     maxTokens: number;
     messages: ChatOptions["messages"];
-    tools?: Tool[];
+    tools?: ToolDefinition[];
     temperature: number;
   }): Promise<OpenAIResponse> {
     const baseUrl = this.apiBase || OPENAI_API_BASE;
@@ -195,7 +195,7 @@ export class OpenAIProvider extends LLMProvider {
   /**
    * Convert tools to OpenAI format.
    */
-  private _convertTools(tools: Tool[]): OpenAITool[] {
+  private _convertTools(tools: ToolDefinition[]): OpenAITool[] {
     return tools.map((tool) => ({
       type: "function" as const,
       function: {

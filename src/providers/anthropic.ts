@@ -4,7 +4,7 @@
  * Supports Claude models with tool calling capabilities.
  */
 
-import type { ChatOptions, LLMResponse, Tool, ToolCallRequest } from "./base";
+import type { ChatOptions, LLMResponse, Tool, ToolDefinition, ToolCallRequest } from "./base";
 import { LLMProvider } from "./base";
 
 /**
@@ -258,7 +258,7 @@ export class AnthropicProvider extends LLMProvider {
   /**
    * Convert OpenAI-style tools to Anthropic format.
    */
-  private _convertTools(tools: Tool[]): AnthropicTool[] {
+  private _convertTools(tools: ToolDefinition[]): AnthropicTool[] {
     return tools.map((tool) => ({
       name: tool.name,
       description: tool.description,

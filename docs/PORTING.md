@@ -39,16 +39,70 @@
 
 ### 第三阶段：Agent 核心 (Agent Core)
 
+#### 3A: 工具系统基础 (1h)
+
 | 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
 |------|------|-------------|--------|------|
 | 5 | agent/tools/base | nanobot/agent/tools/base.py | ~100 行 | - |
 | 6 | agent/tools/registry | nanobot/agent/tools/registry.py | ~80 行 | 5 |
+
+**目标**: 实现工具基类和注册表，支持基础工具定义
+
+#### 3B: 上下文管理 (1h)
+
+| 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
+|------|------|-------------|--------|------|
 | 7 | agent/context | nanobot/agent/context.py | ~200 行 | providers, session |
+
+**目标**: 管理对话上下文，构建消息历史
+
+#### 3C: 核心循环 (2h)
+
+| 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
+|------|------|-------------|--------|------|
 | 8 | agent/loop | nanobot/agent/loop.py | ~300 行 | 6, 7, providers |
-| 9 | agent/memory | nanobot/agent/memory.py | ~150 行 | session |
-| 10 | agent/skills | nanobot/agent/skills.py | ~100 行 | config |
-| 11 | agent/subagent | nanobot/agent/subagent.py | ~200 行 | 8 |
+
+**目标**: 实现 Agent 主循环，处理 LLM 调用和工具执行
+
+**验证**: 能跑通一个简单对话 + 工具调用
+
+#### 3D: 内置工具集 (2h)
+
+| 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
+|------|------|-------------|--------|------|
 | 12 | agent/tools/* | nanobot/agent/tools/*.py | ~500 行 | 5, 6 |
+
+**目标**: 实现 web, shell, filesystem, message, spawn 等内置工具
+
+**验证**: 每个工具单独测试
+
+#### 3E: 记忆系统 (1h)
+
+| 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
+|------|------|-------------|--------|------|
+| 9 | agent/memory | nanobot/agent/memory.py | ~150 行 | session |
+
+**目标**: 短期/长期记忆管理
+
+#### 3F: 技能系统 (1h)
+
+| 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
+|------|------|-------------|--------|------|
+| 10 | agent/skills | nanobot/agent/skills.py | ~100 行 | config |
+
+**目标**: Skill 加载和执行
+
+#### 3G: 子 Agent (1h)
+
+| 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
+|------|------|-------------|--------|------|
+| 11 | agent/subagent | nanobot/agent/subagent.py | ~200 行 | 8 |
+
+**目标**: 子任务委托和结果汇总
+
+---
+
+**阶段总结**: 3A-3G 共 7 个子阶段，每个 ~1h，总计 ~8h
 
 ### 第四阶段：扩展功能 (Extensions)
 
@@ -245,7 +299,25 @@ deadbot/
 |------|--------|----------|
 | 第一阶段 | 2 | 0.5 天 |
 | 第二阶段 | 2 | 1 天 |
-| 第三阶段 | 8 | 3 天 |
+| 第三阶段 3A | 2 | 1h |
+| 第三阶段 3B | 1 | 1h |
+| 第三阶段 3C | 1 | 2h |
+| 第三阶段 3D | 1 | 2h |
+| 第三阶段 3E | 1 | 1h |
+| 第三阶段 3F | 1 | 1h |
+| 第三阶段 3G | 1 | 1h |
 | 第四阶段 | 5 | 2 天 |
 | 第五阶段 | 1 | 0.5 天 |
-| **总计** | **18** | **~7 天** |
+| **总计** | **18** | **~9 天** |
+
+### 第三阶段详细安排
+
+| 子阶段 | 模块 | 验证方式 |
+|--------|------|----------|
+| 3A | tools/base + registry | 单元测试 |
+| 3B | context | 单元测试 |
+| 3C | loop | 集成测试（模拟 LLM） |
+| 3D | tools/* | 每个工具单独测试 |
+| 3E | memory | 单元测试 |
+| 3F | skills | 加载测试 |
+| 3G | subagent | 集成测试 |

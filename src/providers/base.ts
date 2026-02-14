@@ -37,7 +37,7 @@ export interface ChatOptions {
   /** List of messages to send */
   messages: Message[];
   /** Optional tool definitions */
-  tools?: Tool[];
+  tools?: ToolDefinition[];
   /** Model identifier (provider-specific) */
   model?: string;
   /** Maximum tokens in response */
@@ -46,14 +46,41 @@ export interface ChatOptions {
   temperature?: number;
 }
 
-export interface Tool {
+/**
+ * Abstract base class for tools.
+ */
+export abstract class Tool {
   /** Tool name */
-  name: string;
+  abstract name: string;
   /** Tool description */
-  description: string;
+  abstract description: string;
   /** JSON schema for tool parameters */
-  parameters: Record<string, unknown>;
+  abstract parameters: Record<string, unknown>;
+
+  /**
+   * Execute the tool with the given parameters.
+   */
+  abstract execute(params: Record<string, unknown>): Promise<string>;
+
+  /**
+   * Convert the tool to OpenAI function calling format.
+   */
+  toSchema(): Record<string, unknown> {
+    return {
+      type: "function",
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: this.parameters,
+      },
+    };
+  }
 }
+
+/**
+ * Type alias for tool schema representation used in API calls.
+ */
+export type ToolDefinition = Pick<Tool, "name" | "description" | "parameters">;
 
 /**
  * Abstract base class for LLM providers.
