@@ -102,7 +102,7 @@ export class SessionManager {
 
       return new Session(key, {
         messages,
-        created_at: createdAt?.toISOString() ?? new Date().toISOString(),
+        createdAt: createdAt?.toISOString() ?? new Date().toISOString(),
         metadata,
       });
     } catch (e) {
@@ -122,11 +122,10 @@ export class SessionManager {
     try {
       const lines: string[] = [];
 
-      // Write metadata first
       const metadataLine: JsonlMetadata = {
         _type: "metadata",
-        created_at: session.created_at.toISOString(),
-        updated_at: session.updated_at.toISOString(),
+        created_at: session.createdAt.toISOString(),
+        updated_at: session.updatedAt.toISOString(),
         metadata: session.metadata,
       };
       lines.push(JSON.stringify(metadataLine));
@@ -186,8 +185,8 @@ export class SessionManager {
           if (data._type === "metadata") {
             sessions.push({
               key: file.replace(".jsonl", "").replace(/_/g, ":"),
-              created_at: data.created_at,
-              updated_at: data.updated_at,
+              createdAt: data.created_at,
+              updatedAt: data.updated_at,
               path,
             });
           }
@@ -198,8 +197,8 @@ export class SessionManager {
     }
 
     return sessions.sort((a, b) => {
-      const aTime = a.updated_at ?? "";
-      const bTime = b.updated_at ?? "";
+      const aTime = a.updatedAt ?? "";
+      const bTime = b.updatedAt ?? "";
       return bTime.localeCompare(aTime);
     });
   }

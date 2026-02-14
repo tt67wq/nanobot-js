@@ -10,8 +10,8 @@ import type { LLMMessage, SessionData, SessionMessage } from "./types";
 export class Session {
   public readonly key: string;
   public messages: SessionMessage[];
-  public readonly created_at: Date;
-  public updated_at: Date;
+  public readonly createdAt: Date;
+  public updatedAt: Date;
   public metadata: Record<string, unknown>;
 
   /**
@@ -23,8 +23,8 @@ export class Session {
   constructor(key: string, data?: Partial<SessionData>) {
     this.key = key;
     this.messages = data?.messages ?? [];
-    this.created_at = data?.created_at ? new Date(data.created_at) : new Date();
-    this.updated_at = data?.updated_at ? new Date(data.updated_at) : new Date();
+    this.createdAt = data?.createdAt ? new Date(data.createdAt) : new Date();
+    this.updatedAt = data?.updatedAt ? new Date(data.updatedAt) : new Date();
     this.metadata = data?.metadata ?? {};
   }
 
@@ -43,7 +43,7 @@ export class Session {
       ...extra,
     };
     this.messages.push(message);
-    this.updated_at = new Date();
+    this.updatedAt = new Date();
   }
 
   /**
@@ -61,13 +61,13 @@ export class Session {
     return recent.map((m) => ({
       role: m.role as "user" | "assistant" | "system",
       content: m.content,
-      ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+      ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
     }));
   }
 
   clear(): void {
     this.messages = [];
-    this.updated_at = new Date();
+    this.updatedAt = new Date();
   }
 
   /**
@@ -79,8 +79,8 @@ export class Session {
     return {
       key: this.key,
       messages: this.messages,
-      created_at: this.created_at.toISOString(),
-      updated_at: this.updated_at.toISOString(),
+      createdAt: this.createdAt.toISOString(),
+      updatedAt: this.updatedAt.toISOString(),
       metadata: this.metadata,
     };
   }

@@ -9,9 +9,9 @@ export interface SessionMessage {
   content: string;
   timestamp: string;
   /** Optional tool call information */
-  tool_calls?: ToolCall[];
+  toolCalls?: ToolCall[];
   /** Optional tool call ID for tool responses */
-  tool_call_id?: string;
+  toolCallId?: string;
   /** Additional metadata */
   [key: string]: unknown;
 }
@@ -25,15 +25,15 @@ export interface ToolCall {
 export interface SessionData {
   key: string;
   messages: SessionMessage[];
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
   metadata: Record<string, unknown>;
 }
 
 export interface SessionInfo {
   key: string;
-  created_at: string | null;
-  updated_at: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
   path: string;
 }
 
@@ -43,5 +43,5 @@ export interface SessionInfo {
 export interface LLMMessage {
   role: "user" | "assistant" | "system";
   content: string;
-  tool_calls?: ToolCall[];
+  toolCalls?: ToolCall[];
 }
