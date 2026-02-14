@@ -162,7 +162,10 @@ export class AnthropicProvider extends LLMProvider {
       body.tools = params.tools;
     }
 
-    const apiBase = this.apiBase || ANTHROPIC_API_BASE;
+    let apiBase = this.apiBase || ANTHROPIC_API_BASE;
+    if (apiBase && !apiBase.endsWith("/v1/messages")) {
+      apiBase = apiBase.replace(/\/$/, "") + "/v1/messages";
+    }
     const response = await fetch(apiBase, {
       method: "POST",
       headers,
