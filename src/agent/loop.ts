@@ -1,6 +1,7 @@
 import { ToolRegistry } from "../tools/registry";
 import { ContextBuilder } from "./context";
 import { SkillsLoader } from "./skills";
+import { WebSearchTool, WebFetchTool, ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, ExecTool, MessageTool, SpawnTool } from "../tools";
 import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
@@ -77,20 +78,32 @@ export class AgentLoop {
   private _log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void {
     if (!this.verbose && level === 'debug') return;
     const prefix = `[AgentLoop:${level.toUpperCase()}]`;
-    const formatted = args.length > 0 ? ' ' + args.map(a => JSON.stringify(a)).join(' ') : '';
-    if (level === 'debug') console.debug(prefix, message, formatted);
-    else if (level === 'info') console.log(prefix, message, formatted);
-    else if (level === 'warn') console.warn(prefix, message, formatted);
-    else console.error(prefix, message, formatted);
+    
+    // 使用消息格式化替换 %s 占位符
+    let formatted = message;
+    for (const arg of args) {
+      formatted = formatted.replace('%s', JSON.stringify(arg));
+    }
+    
+    if (level === 'debug') console.debug(prefix, formatted);
+    else if (level === 'info') console.log(prefix, formatted);
+    else if (level === 'warn') console.warn(prefix, formatted);
+    else console.error(prefix, formatted);
   }
 
   private _registerDefaultTools(): void {
-    // MVP: Stub - tools will be registered in Phase 3D
-    // TODO: Register ReadFileTool, WriteFileTool, etc.
+    this.tools.register(new WebSearchTool());
+    this.tools.register(new WebFetchTool());
+    this.tools.register(new ReadFileTool());
+    this.tools.register(new WriteFileTool());
+    this.tools.register(new EditFileTool());
+    this.tools.register(new ListDirTool());
+    this.tools.register(new ExecTool());
+    this.tools.register(new MessageTool());
+    this.tools.register(new SpawnTool());
   }
 
   private _registerMcpTools(): void {
-    // Stub: MCP will be implemented in Phase 4
     return;
   }
 
@@ -101,11 +114,8 @@ export class AgentLoop {
     this._log('info', '=== processDirect() called ===');
     this._log('info', 'Session: %s, Content: "%s"', sessionKey, content.substring(0, 50));
     
-    // Get or create session
     const session = this.sessions.getOrCreate(sessionKey);
-    this._log('debug', 'Session history length:', session.getHistory().length);
     
-    // Build messages
     const messages: Message[] = [
       {
         role: "system",
@@ -121,22 +131,19 @@ export class AgentLoop {
       }
     ];
     
-    // Agent loop
     let iteration = 0;
     let finalContent: string | null = null;
     
     while (iteration < this.maxIterations) {
       iteration++;
       
-      // Call LLM
       const response = await this.provider.chat({
         messages,
         tools: this.tools.get_definitions(),
         model: this.model
       });
       
-      // Handle tool calls
-      if (response.toolCalls.length > 0) {
+      if (response.toolCalls && response.toolCalls.length > 0) {
         // Add assistant message with tool calls
         messages.push({
           role: "assistant",

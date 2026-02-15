@@ -1,4 +1,4 @@
-export { Tool, ToolDefinition } from '../providers/base';
+export type { Tool, ToolDefinition } from '../providers/base';
 export { ToolRegistry } from './registry';
 export { ReadFileTool, WriteFileTool, EditFileTool, ListDirTool } from './filesystem';
 export { ExecTool } from './shell';
