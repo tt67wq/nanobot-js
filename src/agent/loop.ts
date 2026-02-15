@@ -1,8 +1,14 @@
 import { ToolRegistry } from "../tools/registry";
 import { ContextBuilder } from "./context";
+import { SkillsLoader } from "./skills";
 import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export interface AgentLoopOptions {
   model?: string;
@@ -27,11 +33,39 @@ export class AgentLoop {
     console.debug('[AgentLoop] Model:', options?.model ?? provider.getDefaultModel());
     
     this.tools = new ToolRegistry();
-    this.context = new ContextBuilder(workspace);
     this.sessions = new SessionManager(workspace);
     this.model = options?.model ?? provider.getDefaultModel();
     this.maxIterations = options?.maxIterations ?? 20;
     this.verbose = (options as any)?.verbose ?? true;
+    
+    // ============================================================
+    // [DEBUG] 创建 SkillsLoader 并传入 ContextBuilder
+    // ============================================================
+    const builtinSkillsDir = process.env.NANOBOT_BUILTIN_SKILLS || join(__dirname, "../skills");
+    console.debug('[AgentLoop] Creating SkillsLoader...');
+    console.debug('[AgentLoop] Workspace:', workspace);
+    console.debug('[AgentLoop] Builtin skills dir:', builtinSkillsDir);
+    
+    const skillsLoader = new SkillsLoader(workspace, builtinSkillsDir);
+    
+    // 列出所有可用的 skills（用于 debug）
+    const allSkills = skillsLoader.list_skills(false);
+    console.debug('[AgentLoop] Found %d skills (unfiltered):', allSkills.length);
+    for (const skill of allSkills) {
+      console.debug('[AgentLoop]   - %s (source: %s, path: %s)', skill.name, skill.source, skill.path);
+    }
+    
+    const availableSkills = skillsLoader.list_skills(true);
+    console.debug('[AgentLoop] Found %d available skills:', availableSkills.length);
+    
+    // 检查 always-skills
+    const alwaysSkills = skillsLoader.get_always_skills();
+    console.debug('[AgentLoop] Always-loaded skills:', alwaysSkills);
+    
+    // 将 SkillsLoader 传入 ContextBuilder
+    this.context = new ContextBuilder(workspace, null, skillsLoader);
+    console.debug('[AgentLoop] SkillsLoader passed to ContextBuilder');
+    // ============================================================
     
     this._registerDefaultTools();
     this._registerMcpTools();
