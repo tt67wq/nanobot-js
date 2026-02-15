@@ -172,6 +172,7 @@ gatewayCmd
 
     if (channels.enabledChannels.length > 0) {
       console.log(chalk.green('✓') + ` Channels: ${channels.enabledChannels.join(', ')}`);
+      await channels.startAll();
     } else {
       console.log(chalk.yellow('Warning: No channels enabled'));
     }
@@ -188,13 +189,14 @@ gatewayCmd
     try {
       await cron.start();
       await heartbeat.start();
-      await Promise.all([
-        new Promise(() => {}),
-      ]);
+      
+      // Keep the process running
+      await new Promise(() => {});
     } catch (e) {
       console.log('\nShutting down...');
       heartbeat.stop();
       cron.stop();
+      await channels.stopAll();
     }
   });
 

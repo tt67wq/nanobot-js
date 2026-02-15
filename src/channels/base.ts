@@ -46,7 +46,11 @@ export abstract class BaseChannel {
     media?: string[],
     metadata?: Record<string, unknown>
   ): Promise<void> {
+    console.debug(`[${this.name}:handleMessage] Received message from ${senderId} in ${chatId}`);
+    console.debug(`[${this.name}:handleMessage] Content: ${content.substring(0, 100)}...`);
+    
     if (!this.isAllowed(senderId)) {
+      console.debug(`[${this.name}:handleMessage] Sender ${senderId} NOT allowed (allowList: ${JSON.stringify(this.config.allowFrom)})`);
       return;
     }
 
@@ -59,7 +63,9 @@ export abstract class BaseChannel {
       metadata: metadata ?? {},
     };
 
+    console.debug(`[${this.name}:handleMessage] Publishing to bus:`, msg);
     await this.bus.publishInbound(msg);
+    console.debug(`[${this.name}:handleMessage] Published to bus successfully`);
   }
 
   get isRunning(): boolean {
