@@ -7,8 +7,15 @@
 - **项目名称**: deadbot
 
 - **注意事项**:
-  - 使用 bun 而不是 nodejs
-  - 使用 bun 而不是 nodejs
-  - 使用 bun 而不是 nodejs
-  - 使用 bun 而不是 nodejs
-  - 使用 bun 而不是 nodejs
+  - 使用 bun 
+  - 使用 bun 
+  - 使用 bun 
+  - 使用 bun 
+  - 使用 bun
+  
+- **USER**:
+  - 我是 JS 小白，代码最好附上详细注释
+  - 我是 JS 小白，代码最好附上详细注释
+  - 我是 JS 小白，代码最好附上详细注释
+  - 我是 JS 小白，代码最好附上详细注释
+  - 我是 JS 小白，代码最好附上详细注释
