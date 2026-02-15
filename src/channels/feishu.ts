@@ -236,9 +236,6 @@ export class FeishuChannel extends BaseChannel {
   }
 
   async send(msg: OutboundMessage): Promise<void> {
-    this.log('debug', '=== send() called ===');
-    this.log('debug', 'To chatId: %s', msg.chatId);
-
     if (!this.apiClient) {
       this.log('error', 'API client not initialized');
       return;
@@ -251,22 +248,26 @@ export class FeishuChannel extends BaseChannel {
       });
 
       const response = await this.apiClient.im.message.create({
-        receiveIdType: 'chat_id',
-        requestBody: {
-          receiveId: msg.chatId,
-          msgType: 'interactive',
+        params: {
+          receive_id_type: 'chat_id',
+        },
+        data: {
+          receive_id: msg.chatId,
+          msg_type: 'interactive',
           content: cardContent,
         },
       });
 
-      if (response.success()) {
-        this.log('info', '✓ Message sent successfully to %s', msg.chatId);
+      const respCode = (response as any).code;
+      
+      if (respCode === 0) {
+        this.log('info', '✓ Message sent to %s', msg.chatId);
       } else {
-        this.log('error', 'Failed to send: %s %s', response.code, response.msg);
+        this.log('error', 'Failed to send: code=%s, msg=%s', respCode, (response as any).msg);
       }
 
-    } catch (e) {
-      this.log('error', 'Error sending message:', e);
+    } catch (e: any) {
+      this.log('error', 'Error sending message: %s', e?.message || e);
     }
   }
 }

@@ -6,6 +6,7 @@ import { loadConfig, saveConfig, getConfigPath, getDataDir } from '../config/loa
 import { getWorkspacePath } from '../utils/helpers';
 import { AgentLoop } from '../agent/loop';
 import { MessageBus } from '../bus/queue';
+import { getSessionKey } from '../bus/events';
 import { ChannelManager } from '../channels/manager';
 import { CronService } from '../cron/service';
 import { HeartbeatService } from '../heartbeat/service';
@@ -190,8 +191,44 @@ gatewayCmd
       await cron.start();
       await heartbeat.start();
       
-      // Keep the process running
-      await new Promise(() => {});
+      // ============================================
+      // 启动消息消费循环 - 读取 bus 中的入站消息并处理
+      // ============================================
+      const messageLoop = async () => {
+        console.log('[Gateway:INFO] Starting message consumption loop...');
+        while (true) {
+          try {
+            // 等待并读取入站消息
+            const inboundMsg = await bus.consumeInbound();
+            console.log('[Gateway:DEBUG] Received inbound message:', inboundMsg.content.substring(0, 50));
+            
+            // 生成会话键
+            const sessionKey = getSessionKey(inboundMsg);
+            
+            // 调用 AgentLoop 处理消息
+            const response = await agent.processDirect(inboundMsg.content, sessionKey);
+            
+            // 将响应发布到出站队列
+            const outboundMsg = {
+              channel: inboundMsg.channel,
+              chatId: inboundMsg.chatId,
+              content: response,
+              replyTo: inboundMsg.metadata?.message_id as string | undefined,
+              metadata: inboundMsg.metadata,
+            };
+            
+            await bus.publishOutbound(outboundMsg);
+            console.log('[Gateway:DEBUG] Published response to outbound queue');
+          } catch (e) {
+            console.error('[Gateway:ERROR] Error processing message:', e);
+          }
+        }
+      };
+      
+      // 启动消息消费循环 (不阻塞)
+      messageLoop();
+      
+      console.log('[Gateway:INFO] Message loops started');
     } catch (e) {
       console.log('\nShutting down...');
       heartbeat.stop();
@@ -500,6 +537,6 @@ export function runCLI(args: string[]) {
   program.parse(args);
 }
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   runCLI(process.argv);
 }

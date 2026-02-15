@@ -2,6 +2,7 @@ import type { MessageBus } from '../bus/queue';
 import type { OutboundMessage } from '../bus/events';
 import type { BaseChannel } from './base';
 import type { Config } from '../config/schema';
+import { FeishuChannel } from './feishu';
 
 export class ChannelManager {
   private channels: Map<string, BaseChannel> = new Map();
@@ -18,7 +19,6 @@ export class ChannelManager {
   private initChannels(): void {
     if (this.config.channels?.feishu?.enabled) {
       try {
-        const { FeishuChannel } = require('./feishu');
         this.channels.set('feishu', new FeishuChannel(
           this.config.channels.feishu as Record<string, unknown>,
           this.bus
@@ -101,9 +101,8 @@ export class ChannelManager {
     const start = Date.now();
     while (!this.shouldStop) {
       if (this.bus.outboundSize > 0) {
-        // Simple approach - we'd need a better queue in production
-        await new Promise(resolve => setTimeout(resolve, 50));
-        continue;
+        // 直接从 bus 消费出站消息
+        return await this.bus.consumeOutbound();
       }
       if (Date.now() - start > timeoutMs) {
         return null;

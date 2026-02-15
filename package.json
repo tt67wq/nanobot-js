@@ -9,8 +9,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "bun run src/index.ts",
-    "start": "bun run dist/index.js",
+    "dev": "bun x tsx src/cli/index.ts",
+    "start": "bun x tsx src/cli/index.ts",
+    "gateway": "bun x tsx src/cli/index.ts gateway",
     "test": "bun test"
   },
   "dependencies": {

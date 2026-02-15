@@ -15,20 +15,39 @@ export class AgentLoop {
   private sessions: SessionManager;
   private model: string;
   private maxIterations: number;
+  private verbose: boolean = true;
   
   constructor(
     private provider: LLMProvider,
     workspace: string,
     options?: AgentLoopOptions
   ) {
+    console.debug('[AgentLoop] Creating AgentLoop...');
+    console.debug('[AgentLoop] Provider:', provider.constructor.name);
+    console.debug('[AgentLoop] Model:', options?.model ?? provider.getDefaultModel());
+    
     this.tools = new ToolRegistry();
     this.context = new ContextBuilder(workspace);
     this.sessions = new SessionManager(workspace);
     this.model = options?.model ?? provider.getDefaultModel();
     this.maxIterations = options?.maxIterations ?? 20;
+    this.verbose = (options as any)?.verbose ?? true;
     
     this._registerDefaultTools();
     this._registerMcpTools();
+    
+    console.debug('[AgentLoop] Created successfully');
+    console.debug('[AgentLoop] Max iterations:', this.maxIterations);
+  }
+
+  private _log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void {
+    if (!this.verbose && level === 'debug') return;
+    const prefix = `[AgentLoop:${level.toUpperCase()}]`;
+    const formatted = args.length > 0 ? ' ' + args.map(a => JSON.stringify(a)).join(' ') : '';
+    if (level === 'debug') console.debug(prefix, message, formatted);
+    else if (level === 'info') console.log(prefix, message, formatted);
+    else if (level === 'warn') console.warn(prefix, message, formatted);
+    else console.error(prefix, message, formatted);
   }
 
   private _registerDefaultTools(): void {
@@ -45,8 +64,12 @@ export class AgentLoop {
     content: string, 
     sessionKey: string = "cli:direct"
   ): Promise<string> {
+    this._log('info', '=== processDirect() called ===');
+    this._log('info', 'Session: %s, Content: "%s"', sessionKey, content.substring(0, 50));
+    
     // Get or create session
     const session = this.sessions.getOrCreate(sessionKey);
+    this._log('debug', 'Session history length:', session.getHistory().length);
     
     // Build messages
     const messages: Message[] = [
