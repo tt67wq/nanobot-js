@@ -11,6 +11,8 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "cron-parser": "^5.5.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
