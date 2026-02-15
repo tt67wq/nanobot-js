@@ -374,13 +374,19 @@ program
   });
 
 function createProvider(config: ReturnType<typeof loadConfig>) {
-  const anthropicKey = config.providers.anthropic?.api_key;
-  const openaiKey = config.providers.openai?.api_key;
+  // 配置文件可能是 camelCase 或 snake_case，都兼容
+  const anthropic = config.providers.anthropic as any;
+  const openai = config.providers.openai as any;
+  
+  const anthropicKey = anthropic?.apiKey || anthropic?.api_key;
+  const openaiKey = openai?.apiKey || openai?.api_key;
+  const anthropicBase = anthropic?.apiBase || anthropic?.api_base;
+  const openaiBase = openai?.apiBase || openai?.api_base;
 
   if (anthropicKey) {
-    return new AnthropicProvider(anthropicKey, config.providers.anthropic?.api_base ?? null);
+    return new AnthropicProvider(anthropicKey, anthropicBase ?? null);
   } else if (openaiKey) {
-    return new OpenAIProvider(openaiKey, config.providers.openai?.api_base ?? null);
+    return new OpenAIProvider(openaiKey, openaiBase ?? null);
   }
 
   return null;

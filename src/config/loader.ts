@@ -17,7 +17,8 @@ export function loadConfig(configPath?: string): Config {
   if (existsSync(path)) {
     try {
       const data = JSON.parse(readFileSync(path, "utf8"));
-      const convertedData = convertKeys(data, true);
+      // 配置文件是 camelCase (apiKey)，需要转成 snake_case (api_key) 给 Schema 用
+      const convertedData = convertKeys(data, false);
       return new Config(convertedData);
     } catch (e) {
       console.warn(`Warning: Failed to load config from ${path}:`, e);
