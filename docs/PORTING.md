@@ -230,7 +230,7 @@
 ## 文件结构
 
 ```
-deadbot/
+nanobot/
 ├── src/
 │   ├── config/          # 配置加载
 │   │   ├── loader.ts

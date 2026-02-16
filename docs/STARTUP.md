@@ -1,11 +1,11 @@
-# Deadbot 启动指南
+# nanobot 启动指南
 
 ## 1. 初始化配置
 
 首次使用时，需要先初始化配置和工作空间：
 
 ```bash
-cd /Users/admin/Project/Javascript/deadbot
+cd /Users/admin/Project/Javascript/nanobot
 
 # 初始化 (会创建 ~/.nanobot/config.json)
 bun run src/cli/commands.ts onboard

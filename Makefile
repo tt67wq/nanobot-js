@@ -2,7 +2,7 @@
 
 # 默认目标
 help:
-	@echo "Deadbot Makefile"
+	@echo "nanobot Makefile"
 	@echo ""
 	@echo "Usage: make <command>"
 	@echo ""
