@@ -62,8 +62,14 @@ clean:
 # 读取 VERSION 文件
 VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
 
+# 编译输出目录
+BIN_DIR := bin
+
 # 编译输出文件名
 BINARY_NAME := nanobot
+
+# 完整输出路径
+OUTPUT := $(BIN_DIR)/$(BINARY_NAME)
 
 # 入口文件（TypeScript 源文件）
 ENTRYPOINT := src/cli/commands.ts
@@ -79,46 +85,50 @@ ifdef TARGET
 	COMPILE_OPTS += --target=$(TARGET)
 endif
 
+# 确保 bin 目录存在
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
 # 本平台编译
-build-binary:
+build-binary: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION)..."
 	@echo "Target: $(if $(TARGET),$(TARGET),current platform)"
-	bun build $(COMPILE_OPTS) $(ENTRYPOINT) --outfile $(BINARY_NAME)
-	@echo "Done! Binary: ./$(BINARY_NAME)"
-	@chmod +x $(BINARY_NAME)
+	bun build $(COMPILE_OPTS) $(ENTRYPOINT) --outfile $(OUTPUT)
+	@echo "Done! Binary: ./$(OUTPUT)"
+	@chmod +x $(OUTPUT)
 
 # 跨平台编译 - Linux x64
-build-linux-x64:
+build-linux-x64: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION) for Linux x64..."
-	bun build --compile --minify --target=bun-linux-x64 $(ENTRYPOINT) --outfile $(BINARY_NAME)-linux-x64
-	@echo "Done! Binary: ./$(BINARY_NAME)-linux-x64"
+	bun build --compile --minify --target=bun-linux-x64 $(ENTRYPOINT) --outfile $(BIN_DIR)/$(BINARY_NAME)-linux-x64
+	@echo "Done! Binary: ./$(BIN_DIR)/$(BINARY_NAME)-linux-x64"
 
 # 跨平台编译 - Linux ARM64
-build-linux-arm64:
+build-linux-arm64: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION) for Linux ARM64..."
-	bun build --compile --minify --target=bun-linux-arm64 $(ENTRYPOINT) --outfile $(BINARY_NAME)-linux-arm64
-	@echo "Done! Binary: ./$(BINARY_NAME)-linux-arm64"
+	bun build --compile --minify --target=bun-linux-arm64 $(ENTRYPOINT) --outfile $(BIN_DIR)/$(BINARY_NAME)-linux-arm64
+	@echo "Done! Binary: ./$(BIN_DIR)/$(BINARY_NAME)-linux-arm64"
 
 # 跨平台编译 - Windows x64
-build-windows-x64:
+build-windows-x64: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION) for Windows x64..."
-	bun build --compile --minify --target=bun-windows-x64 $(ENTRYPOINT) --outfile $(BINARY_NAME)-win-x64
-	@echo "Done! Binary: ./$(BINARY_NAME)-win-x64.exe"
+	bun build --compile --minify --target=bun-windows-x64 $(ENTRYPOINT) --outfile $(BIN_DIR)/$(BINARY_NAME)-win-x64
+	@echo "Done! Binary: ./$(BIN_DIR)/$(BINARY_NAME)-win-x64.exe"
 
 # 跨平台编译 - macOS x64
-build-darwin-x64:
+build-darwin-x64: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION) for macOS x64..."
-	bun build --compile --minify --target=bun-darwin-x64 $(ENTRYPOINT) --outfile $(BINARY_NAME)-darwin-x64
-	@echo "Done! Binary: ./$(BINARY_NAME)-darwin-x64"
+	bun build --compile --minify --target=bun-darwin-x64 $(ENTRYPOINT) --outfile $(BIN_DIR)/$(BINARY_NAME)-darwin-x64
+	@echo "Done! Binary: ./$(BIN_DIR)/$(BINARY_NAME)-darwin-x64"
 
 # 跨平台编译 - macOS ARM64 (Apple Silicon)
-build-darwin-arm64:
+build-darwin-arm64: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION) for macOS ARM64..."
-	bun build --compile --minify --target=bun-darwin-arm64 $(ENTRYPOINT) --outfile $(BINARY_NAME)-darwin-arm64
-	@echo "Done! Binary: ./$(BINARY_NAME)-darwin-arm64"
+	bun build --compile --minify --target=bun-darwin-arm64 $(ENTRYPOINT) --outfile $(BIN_DIR)/$(BINARY_NAME)-darwin-arm64
+	@echo "Done! Binary: ./$(BIN_DIR)/$(BINARY_NAME)-darwin-arm64"
 
 # 编译所有平台（交叉编译）
-build-all:
+build-all: $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) v$(VERSION) for all platforms..."
 	$(MAKE) build-linux-x64
 	$(MAKE) build-linux-arm64
@@ -127,11 +137,11 @@ build-all:
 	$(MAKE) build-darwin-arm64
 	@echo ""
 	@echo "All binaries built:"
-	@ls -lh $(BINARY_NAME)-*
+	@ls -lh $(BIN_DIR)/$(BINARY_NAME)-*
 
 # 清理编译产物
 clean-binary:
-	rm -f $(BINARY_NAME) $(BINARY_NAME)-*
+	rm -rf $(BIN_DIR)/$(BINARY_NAME) $(BIN_DIR)/$(BINARY_NAME)-*
 
 # ===========================================
 # Main Commands

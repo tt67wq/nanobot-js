@@ -1,6 +1,7 @@
 node_modules/
 .nanobot/
 dist/
+bin/
 *.log
 .env
 .DS_Store
