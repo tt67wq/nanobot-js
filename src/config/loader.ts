@@ -2,6 +2,9 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Config, ConfigSchema } from "./schema";
+import { Logger } from "../utils/logger";
+
+const logger = new Logger({ module: 'CONFIG' });
 
 export function getConfigPath(): string {
   return join(homedir(), ".nanobot", "config.json");
@@ -21,8 +24,8 @@ export function loadConfig(configPath?: string): Config {
       const convertedData = convertKeys(data, false);
       return new Config(convertedData);
     } catch (e) {
-      console.warn(`Warning: Failed to load config from ${path}:`, e);
-      console.log("Using default configuration.");
+      logger.warn('Failed to load config from %s: %s', path, String(e));
+      logger.info('Using default configuration.');
     }
   }
 

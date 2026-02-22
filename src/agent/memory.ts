@@ -1,6 +1,9 @@
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { IMemoryStore } from "./types";
+import { Logger } from "../utils/logger";
+
+const logger = new Logger({ module: 'MEMORY' });
 
 export class MemoryStore implements IMemoryStore {
   private memoryDir: string;
@@ -113,7 +116,7 @@ export class MemoryStore implements IMemoryStore {
 
       return parts.join("\n\n") || null;
     } catch (error) {
-      console.error("Error getting memory context:", error);
+      logger.error('Error getting memory context: %s', String(error));
       return null;
     }
   }

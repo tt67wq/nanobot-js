@@ -11,6 +11,9 @@ import { join } from "node:path";
 import { Session } from "./session";
 import type { SessionInfo, SessionMessage } from "./types";
 import { ensureDir, safeFilename, getSessionsPath } from "../utils/index";
+import { Logger } from "../utils/logger";
+
+const logger = new Logger({ module: 'SESSION' });
 
 interface JsonlMetadata {
   _type: "metadata";
@@ -106,7 +109,7 @@ export class SessionManager {
         metadata,
       });
     } catch (e) {
-      console.warn(`Failed to load session ${key}: ${e}`);
+      logger.warn('Failed to load session %s: %s', key, String(e));
       return null;
     }
   }
@@ -138,7 +141,7 @@ export class SessionManager {
       writeFileSync(path, lines.join("\n") + "\n", "utf-8");
       this.cache.set(session.key, session);
     } catch (e) {
-      console.warn(`Failed to save session ${session.key}: ${e}`);
+      logger.warn('Failed to save session %s: %s', session.key, String(e));
     }
   }
 
@@ -159,7 +162,7 @@ export class SessionManager {
         unlinkSync(path);
         return true;
       } catch (e) {
-        console.warn(`Failed to delete session ${key}: ${e}`);
+        logger.warn('Failed to delete session %s: %s', key, String(e));
       }
     }
     return false;

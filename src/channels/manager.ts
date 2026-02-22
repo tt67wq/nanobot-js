@@ -3,6 +3,9 @@ import type { OutboundMessage } from '../bus/events';
 import type { BaseChannel } from './base';
 import type { Config } from '../config/schema';
 import { FeishuChannel } from './feishu';
+import { Logger } from '../utils/logger';
+
+const logger = new Logger({ module: 'CHANNEL' });
 
 export class ChannelManager {
   private channels: Map<string, BaseChannel> = new Map();
@@ -23,16 +26,16 @@ export class ChannelManager {
           this.config.channels.feishu as Record<string, unknown>,
           this.bus
         ));
-        console.log('Feishu channel enabled');
+        logger.info('Feishu channel enabled');
       } catch (e) {
-        console.warn(`Feishu channel not available: ${e}`);
+        logger.warn('Feishu channel not available: %s', String(e));
       }
     }
   }
 
   async startAll(): Promise<void> {
     if (!this.channels.size) {
-      console.warn('No channels enabled');
+      logger.warn('No channels enabled');
       return;
     }
 
@@ -41,7 +44,7 @@ export class ChannelManager {
 
     const tasks: Promise<void>[] = [];
     for (const [name, channel] of this.channels.entries()) {
-      console.log(`Starting ${name} channel...`);
+      logger.info('Starting %s channel...', name);
       tasks.push(channel.start());
     }
 
@@ -49,7 +52,7 @@ export class ChannelManager {
   }
 
   async stopAll(): Promise<void> {
-    console.log('Stopping all channels...');
+    logger.info('Stopping all channels...');
 
     this.shouldStop = true;
 
@@ -65,15 +68,15 @@ export class ChannelManager {
     for (const [name, channel] of this.channels.entries()) {
       try {
         await channel.stop();
-        console.log(`Stopped ${name} channel`);
+        logger.info('Stopped %s channel', name);
       } catch (e) {
-        console.error(`Error stopping ${name}: ${e}`);
+        logger.error('Error stopping %s: %s', name, String(e));
       }
     }
   }
 
   private async dispatchOutbound(): Promise<void> {
-    console.log('Outbound dispatcher started');
+    logger.info('Outbound dispatcher started');
 
     while (!this.shouldStop) {
       try {
@@ -85,10 +88,10 @@ export class ChannelManager {
             try {
               await channel.send(msg);
             } catch (e) {
-              console.error(`Error sending to ${msg.channel}: ${e}`);
+              logger.error('Error sending to %s: %s', msg.channel, String(e));
             }
           } else {
-            console.warn(`Unknown channel: ${msg.channel}`);
+            logger.warn('Unknown channel: %s', msg.channel);
           }
         }
       } catch {

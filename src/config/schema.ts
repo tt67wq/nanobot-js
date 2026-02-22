@@ -113,6 +113,14 @@ export const MCPConfigSchema = z.object({
 
 export type MCPConfig = z.infer<typeof MCPConfigSchema>;
 
+export const LoggerConfigSchema = z.object({
+  level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  format: z.enum(['pretty', 'json']).default('pretty'),
+  output: z.enum(['console', 'file', 'both']).default('console'),
+});
+
+export type LoggerConfig = z.infer<typeof LoggerConfigSchema>;
+
 export const ConfigSchema = z.object({
   agents: AgentsConfigSchema.default(() => AgentsConfigSchema.parse({})),
   channels: ChannelsConfigSchema.default(() => ChannelsConfigSchema.parse({})),
@@ -120,6 +128,7 @@ export const ConfigSchema = z.object({
   gateway: GatewayConfigSchema.default(() => GatewayConfigSchema.parse({})),
   tools: ToolsConfigSchema.default(() => ToolsConfigSchema.parse({})),
   mcp: MCPConfigSchema.default(() => MCPConfigSchema.parse({})),
+  logger: LoggerConfigSchema.default(() => LoggerConfigSchema.parse({})),
 });
 
 export type ConfigType = z.infer<typeof ConfigSchema>;
@@ -131,6 +140,7 @@ export class Config {
   public gateway: GatewayConfig;
   public tools: ToolsConfig;
   public mcp: MCPConfig;
+  public logger: LoggerConfig;
 
   constructor(config: Partial<ConfigType> = {}) {
     const parsed = ConfigSchema.parse(config);
@@ -140,6 +150,7 @@ export class Config {
     this.gateway = parsed.gateway;
     this.tools = parsed.tools;
     this.mcp = parsed.mcp;
+    this.logger = parsed.logger;
   }
 
   // Expands ~ to home directory

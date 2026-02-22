@@ -1,4 +1,7 @@
 import type { InboundMessage, OutboundMessage } from './events';
+import { Logger } from '../utils/logger';
+
+const logger = new Logger({ module: 'BUS' });
 
 type MessageHandler = (msg: OutboundMessage) => Promise<void>;
 
@@ -47,7 +50,7 @@ export class MessageBus {
             try {
               await callback(msg);
             } catch (e) {
-              console.error(`Error dispatching to ${msg.channel}:`, e);
+              logger.error('Error dispatching to %s: %s', msg.channel, String(e));
             }
           }
         }

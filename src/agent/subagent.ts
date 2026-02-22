@@ -10,6 +10,9 @@ import { ListDirTool } from '../tools/filesystem';
 import { ExecTool } from '../tools/shell';
 import { WebSearchTool } from '../tools/web';
 import { WebFetchTool } from '../tools/web';
+import { Logger } from '../utils/logger';
+
+const logger = new Logger({ module: 'SUBAGENT' });
 
 interface SpawnOptions {
   label?: string;
@@ -76,7 +79,7 @@ export class SubagentManager {
       .then(() => this.runningTasks.delete(taskId))
       .catch(() => this.runningTasks.delete(taskId));
     
-    console.log(`[Subagent] Spawned [${taskId}]: ${displayLabel}`);
+    logger.info('Spawned [%s]: %s', taskId, displayLabel);
     
     return `Subagent [${displayLabel}] started (id: ${taskId}). I'll notify you when it completes.`;
   }
@@ -87,7 +90,7 @@ export class SubagentManager {
     label: string,
     origin: Origin
   ): Promise<void> {
-    console.log(`[Subagent] [${taskId}] Starting task: ${label}`);
+    logger.info('[%s] Starting task: %s', taskId, label);
     
     try {
       const tools = new ToolRegistry();
@@ -126,7 +129,7 @@ export class SubagentManager {
           } as Message);
           
           for (const toolCall of response.toolCalls) {
-            console.log(`[Subagent] [${taskId}] Executing: ${toolCall.name}`);
+            logger.info('[%s] Executing: %s', taskId, toolCall.name);
             const result = await tools.execute(toolCall.name, toolCall.arguments);
             messages.push({
               role: 'tool',
@@ -145,13 +148,13 @@ export class SubagentManager {
         finalResult = 'Task completed but no final response was generated.';
       }
       
-      console.log(`[Subagent] [${taskId}] Completed successfully`);
+      logger.info('[%s] Completed successfully', taskId);
       
       await this.announceResult(taskId, label, task, finalResult, origin, 'ok');
       
     } catch (error) {
       const errorMsg = `Error: ${error}`;
-      console.error(`[Subagent] [${taskId}] Failed:`, error);
+      logger.error('[%s] Failed: %s', taskId, String(error));
       
       await this.announceResult(taskId, label, task, errorMsg, origin, 'error');
     }
@@ -184,7 +187,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
     };
     
     await this.bus.publishInbound(msg);
-    console.log(`[Subagent] [${taskId}] Announced result to ${origin.channel}:${origin.chatId}`);
+    logger.info('[%s] Announced result to %s:%s', taskId, origin.channel, origin.chatId);
   }
 
   private buildSubagentPrompt(task: string): string {

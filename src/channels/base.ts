@@ -1,15 +1,18 @@
 import type { InboundMessage, OutboundMessage } from '../bus/events';
 import type { MessageBus } from '../bus/queue';
+import { Logger } from '../utils/logger';
 
 export abstract class BaseChannel {
   name: string = 'base';
   protected config: Record<string, unknown>;
   protected bus: MessageBus;
   protected running = false;
+  protected logger: Logger;
 
   constructor(config: Record<string, unknown>, bus: MessageBus) {
     this.config = config;
     this.bus = bus;
+    this.logger = new Logger({ module: this.name.toUpperCase() });
   }
 
   abstract start(): Promise<void>;
@@ -46,11 +49,11 @@ export abstract class BaseChannel {
     media?: string[],
     metadata?: Record<string, unknown>
   ): Promise<void> {
-    console.debug(`[${this.name}:handleMessage] Received message from ${senderId} in ${chatId}`);
-    console.debug(`[${this.name}:handleMessage] Content: ${content.substring(0, 100)}...`);
+    this.logger.debug('Received message from %s in %s', senderId, chatId);
+    this.logger.debug('Content: %s...', content.substring(0, 100));
     
     if (!this.isAllowed(senderId)) {
-      console.debug(`[${this.name}:handleMessage] Sender ${senderId} NOT allowed (allowList: ${JSON.stringify(this.config.allowFrom)})`);
+      this.logger.debug('Sender %s NOT allowed (allowList: %s)', senderId, JSON.stringify(this.config.allowFrom));
       return;
     }
 
@@ -63,9 +66,9 @@ export abstract class BaseChannel {
       metadata: metadata ?? {},
     };
 
-    console.debug(`[${this.name}:handleMessage] Publishing to bus:`, msg);
+    this.logger.debug('Publishing to bus: %s', JSON.stringify(msg));
     await this.bus.publishInbound(msg);
-    console.debug(`[${this.name}:handleMessage] Published to bus successfully`);
+    this.logger.debug('Published to bus successfully');
   }
 
   get isRunning(): boolean {

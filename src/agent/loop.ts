@@ -7,13 +7,17 @@ import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { Logger } from "../utils/logger";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const logger = new Logger({ module: 'AGENT' });
+
 export interface AgentLoopOptions {
   model?: string;
   maxIterations?: number;
+  verbose?: boolean;
 }
 
 export class AgentLoop {
@@ -29,66 +33,43 @@ export class AgentLoop {
     workspace: string,
     options?: AgentLoopOptions
   ) {
-    console.debug('[AgentLoop] Creating AgentLoop...');
-    console.debug('[AgentLoop] Provider:', provider.constructor.name);
-    console.debug('[AgentLoop] Model:', options?.model ?? provider.getDefaultModel());
+    logger.debug('Creating AgentLoop...');
+    logger.debug('Provider: %s', provider.constructor.name);
+    logger.debug('Model: %s', options?.model ?? provider.getDefaultModel());
     
     this.tools = new ToolRegistry();
     this.sessions = new SessionManager(workspace);
     this.model = options?.model ?? provider.getDefaultModel();
     this.maxIterations = options?.maxIterations ?? 20;
-    this.verbose = (options as any)?.verbose ?? true;
+    this.verbose = options?.verbose ?? true;
     
-    // ============================================================
-    // [DEBUG] 创建 SkillsLoader 并传入 ContextBuilder
-    // ============================================================
     const builtinSkillsDir = process.env.NANOBOT_BUILTIN_SKILLS || join(__dirname, "../skills");
-    console.debug('[AgentLoop] Creating SkillsLoader...');
-    console.debug('[AgentLoop] Workspace:', workspace);
-    console.debug('[AgentLoop] Builtin skills dir:', builtinSkillsDir);
+    logger.debug('Creating SkillsLoader...');
+    logger.debug('Workspace: %s', workspace);
+    logger.debug('Builtin skills dir: %s', builtinSkillsDir);
     
     const skillsLoader = new SkillsLoader(workspace, builtinSkillsDir);
     
-    // 列出所有可用的 skills（用于 debug）
     const allSkills = skillsLoader.list_skills(false);
-    console.debug('[AgentLoop] Found %d skills (unfiltered):', allSkills.length);
+    logger.debug('Found %d skills (unfiltered):', allSkills.length);
     for (const skill of allSkills) {
-      console.debug('[AgentLoop]   - %s (source: %s, path: %s)', skill.name, skill.source, skill.path);
+      logger.debug('  - %s (source: %s, path: %s)', skill.name, skill.source, skill.path);
     }
     
     const availableSkills = skillsLoader.list_skills(true);
-    console.debug('[AgentLoop] Found %d available skills:', availableSkills.length);
+    logger.debug('Found %d available skills:', availableSkills.length);
     
-    // 检查 always-skills
     const alwaysSkills = skillsLoader.get_always_skills();
-    console.debug('[AgentLoop] Always-loaded skills:', alwaysSkills);
+    logger.debug('Always-loaded skills: %s', alwaysSkills);
     
-    // 将 SkillsLoader 传入 ContextBuilder
     this.context = new ContextBuilder(workspace, null, skillsLoader);
-    console.debug('[AgentLoop] SkillsLoader passed to ContextBuilder');
-    // ============================================================
+    logger.debug('SkillsLoader passed to ContextBuilder');
     
     this._registerDefaultTools();
     this._registerMcpTools();
     
-    console.debug('[AgentLoop] Created successfully');
-    console.debug('[AgentLoop] Max iterations:', this.maxIterations);
-  }
-
-  private _log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void {
-    if (!this.verbose && level === 'debug') return;
-    const prefix = `[AgentLoop:${level.toUpperCase()}]`;
-    
-    // 使用消息格式化替换 %s 占位符
-    let formatted = message;
-    for (const arg of args) {
-      formatted = formatted.replace('%s', JSON.stringify(arg));
-    }
-    
-    if (level === 'debug') console.debug(prefix, formatted);
-    else if (level === 'info') console.log(prefix, formatted);
-    else if (level === 'warn') console.warn(prefix, formatted);
-    else console.error(prefix, formatted);
+    logger.debug('Created successfully');
+    logger.debug('Max iterations: %d', this.maxIterations);
   }
 
   private _registerDefaultTools(): void {
@@ -111,8 +92,8 @@ export class AgentLoop {
     content: string, 
     sessionKey: string = "cli:direct"
   ): Promise<string> {
-    this._log('info', '=== processDirect() called ===');
-    this._log('info', 'Session: %s, Content: "%s"', sessionKey, content.substring(0, 50));
+    logger.info('=== processDirect() called ===');
+    logger.info('Session: %s, Content: "%s"', sessionKey, content.substring(0, 50));
     
     const session = this.sessions.getOrCreate(sessionKey);
     
