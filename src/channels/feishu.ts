@@ -24,19 +24,19 @@ export class FeishuChannel extends BaseChannel {
   private log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void {
     if (!this.verbose && level === 'debug') return;
     
-    const msg = `[FEISHU:${level.toUpperCase()}] ${message}`;
-    if (args.length > 0) {
-      const formattedArgs = ' ' + args.map(a => JSON.stringify(a)).join(' ');
-      if (level === 'debug') this.logger.debug(msg + formattedArgs);
-      else if (level === 'info') this.logger.info(msg + formattedArgs);
-      else if (level === 'warn') this.logger.warn(msg + formattedArgs);
-      else this.logger.error(msg + formattedArgs);
-    } else {
-      if (level === 'debug') this.logger.debug(msg);
-      else if (level === 'info') this.logger.info(msg);
-      else if (level === 'warn') this.logger.warn(msg);
-      else this.logger.error(msg);
+    // Replace %s placeholders with args
+    let formattedMsg = message;
+    for (const arg of args) {
+      formattedMsg = formattedMsg.replace('%s', typeof arg === 'string' ? arg : JSON.stringify(arg));
     }
+    
+    const msg = `[FEISHU:${level.toUpperCase()}] ${formattedMsg}`;
+    
+    // Output to logger
+    if (level === 'debug') this.logger.debug(msg);
+    else if (level === 'info') this.logger.info(msg);
+    else if (level === 'warn') this.logger.warn(msg);
+    else this.logger.error(msg);
   }
 
   async start(): Promise<void> {
@@ -62,14 +62,14 @@ export class FeishuChannel extends BaseChannel {
       this.apiClient = new lark.Client({
         appId,
         appSecret,
-        logLevel: lark.LoggerLevel.DEBUG,
+        logLevel: lark.LoggerLevel.WARN,
       });
 
       this.log('debug', 'Creating WSClient...');
       this.wsClient = new lark.WSClient({
         appId,
         appSecret,
-        loggerLevel: lark.LoggerLevel.DEBUG,
+        loggerLevel: lark.LoggerLevel.WARN,
       });
 
       this.log('debug', 'Creating event dispatcher...');
