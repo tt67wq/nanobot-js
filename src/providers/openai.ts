@@ -17,7 +17,7 @@ const OPENAI_API_BASE = "https://api.openai.com/v1";
  */
 interface OpenAIMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | Array<{ type: "text"; text?: string } | { type: "image_url"; image_url?: { url: string } }>;
   tool_call_id?: string;
   name?: string;
 }

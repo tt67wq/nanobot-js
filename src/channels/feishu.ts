@@ -1,6 +1,9 @@
 import { BaseChannel } from './base';
 import type { MessageBus } from '../bus/queue';
 import type { OutboundMessage } from '../bus/events';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { tmpdir } from 'os';
 
 interface FeishuConfig {
   appId?: string;
@@ -130,6 +133,13 @@ export class FeishuChannel extends BaseChannel {
       const messageType = message?.message_type;
       this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
 
+      // Handle image messages
+      if (messageType === 'image') {
+        await this.handleImageMessage(message, senderId, chatId, data);
+        return;
+      }
+
+      // Skip other non-text messages
       if (messageType !== 'text') {
         this.log('debug', 'Skipping non-text message type:', messageType);
         return;
@@ -274,6 +284,127 @@ export class FeishuChannel extends BaseChannel {
 
     } catch (e: any) {
       this.log('error', 'Error sending message: %s', e?.message || e);
+    }
+  }
+
+  /**
+   * Handle incoming image message from Feishu
+   */
+  private async handleImageMessage(
+    message: any,
+    senderId: string,
+    chatId: string,
+    data: any
+  ): Promise<void> {
+    try {
+      const contentJson = message?.content;
+      if (!contentJson) {
+        this.log('warn', 'No content in image message');
+        return;
+      }
+
+      let contentData: Record<string, unknown>;
+      try {
+        contentData = JSON.parse(contentJson);
+      } catch {
+        this.log('warn', 'Failed to parse image message content');
+        return;
+      }
+
+      const imageKey = contentData.image_key as string;
+      if (!imageKey) {
+        this.log('warn', 'No image_key in image message');
+        return;
+      }
+
+      this.log('info', 'Downloading image: %s', imageKey);
+
+      // Download image from Feishu
+      const imagePath = await this.downloadImage(imageKey);
+
+      if (!imagePath) {
+        this.log('error', 'Failed to download image');
+        return;
+      }
+
+      this.log('info', 'Image downloaded to: %s', imagePath);
+
+      // Forward to bus with image path
+      await this.handleMessage(
+        senderId,
+        chatId,
+        '[图片消息]',  // Brief text prompt
+        [imagePath],   // Media: image file path
+        {
+          message_id: message?.message_id,
+          create_time: message?.create_time,
+          event_type: data?.event_type,
+          msg_type: 'image',
+          image_key: imageKey,
+        }
+      );
+
+      this.log('debug', 'Image message forwarded to bus successfully');
+
+    } catch (e: any) {
+      this.log('error', 'Error handling image message:', e);
+    }
+  }
+
+  /**
+   * Download image from Feishu API and save to temp directory
+   */
+  private async downloadImage(imageKey: string): Promise<string | null> {
+    if (!this.apiClient) {
+      this.log('error', 'API client not initialized');
+      return null;
+    }
+
+    try {
+      // Create temp directory if not exists
+      const tempDir = join(tmpdir(), 'nanobot_feishu_images');
+      if (!existsSync(tempDir)) {
+        mkdirSync(tempDir, { recursive: true });
+      }
+
+      // Download image from Feishu
+      const response = await this.apiClient.im.image.get({
+        image_key: imageKey,
+      }) as any;
+
+      // Determine file extension from content type
+      let ext = 'png';
+      if (response.headers && response.headers['content-type']) {
+        const contentType = response.headers['content-type'];
+        if (contentType.includes('jpeg') || contentType.includes('jpg')) {
+          ext = 'jpg';
+        } else if (contentType.includes('gif')) {
+          ext = 'gif';
+        } else if (contentType.includes('webp')) {
+          ext = 'webp';
+        }
+      }
+
+      // Save to temp file
+      const imagePath = join(tempDir, `feishu_${imageKey}_${Date.now()}.${ext}`);
+      
+      // Handle response - may be buffer or blob
+      if (response.data) {
+        writeFileSync(imagePath, Buffer.from(response.data));
+      } else if (response.body) {
+        // Stream or blob
+        const arrayBuffer = await response.body.arrayBuffer();
+        writeFileSync(imagePath, Buffer.from(arrayBuffer));
+      } else {
+        this.log('error', 'Unexpected image response format');
+        return null;
+      }
+
+      return imagePath;
+
+    } catch (e: any) {
+      this.log('error', 'Failed to download image: %s', e?.message || e);
+      return null;
     }
   }
 }

@@ -5,3 +5,4 @@ export { ExecTool } from './shell';
 export { WebSearchTool, WebFetchTool } from './web';
 export { MessageTool } from './message';
 export { SpawnTool } from './spawn';
+export { ScreenshotTool } from './screenshot';

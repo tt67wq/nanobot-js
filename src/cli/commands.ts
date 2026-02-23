@@ -81,6 +81,7 @@ const agentCmd = program
 agentCmd
   .option("-m, --message <message>", "Message to send to the agent")
   .option("-s, --session <session>", "Session ID", "cli:default")
+  .option("-i, --image <paths>", "Image file path(s), comma-separated for multiple")
   .action(async (options) => {
     console.log(LOGO);
 
@@ -104,10 +105,16 @@ agentCmd
       maxIterations: config.agents.defaults.max_tool_iterations,
     });
 
+    // Parse image paths
+    const media = options.image 
+      ? options.image.split(',').map((p: string) => p.trim())
+      : undefined;
+
     if (options.message) {
       const response = await agent.processDirect(
         options.message,
         options.session,
+        media,
       );
       console.log("\n" + response);
     } else {
@@ -118,7 +125,7 @@ agentCmd
           const input = await promptInput(chalk.bold.blue("You: "));
           if (!input.trim()) continue;
 
-          const response = await agent.processDirect(input, options.session);
+          const response = await agent.processDirect(input, options.session, media);
           console.log("\n" + response + "\n");
         } catch (e) {
           console.log("\nGoodbye!");
@@ -233,6 +240,7 @@ gatewayCmd
             const response = await agent.processDirect(
               inboundMsg.content,
               sessionKey,
+              inboundMsg.media,
             );
 
             // 将响应发布到出站队列

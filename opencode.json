@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "saga": {
+      "type": "local",
+      "command": ["npx", "-y", "saga-mcp"],
+      "environment": {
+        "DB_PATH": "~/.saga/tracker.db"
+      }
+    }
+  }
+}

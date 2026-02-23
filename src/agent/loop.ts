@@ -1,7 +1,7 @@
 import { ToolRegistry } from "../tools/registry";
 import { ContextBuilder } from "./context";
 import { SkillsLoader } from "./skills";
-import { WebSearchTool, WebFetchTool, ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, ExecTool, MessageTool, SpawnTool } from "../tools";
+import { WebSearchTool, WebFetchTool, ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, ExecTool, MessageTool, SpawnTool, ScreenshotTool } from "../tools";
 import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
@@ -82,6 +82,7 @@ export class AgentLoop {
     this.tools.register(new ExecTool());
     this.tools.register(new MessageTool());
     this.tools.register(new SpawnTool());
+    this.tools.register(new ScreenshotTool());
   }
 
   private _registerMcpTools(): void {
@@ -90,12 +91,18 @@ export class AgentLoop {
 
   async processDirect(
     content: string, 
-    sessionKey: string = "cli:direct"
+    sessionKey: string = "cli:direct",
+    media?: string[]
   ): Promise<string> {
     logger.info('=== processDirect() called ===');
-    logger.info('Session: %s, Content: "%s"', sessionKey, content.substring(0, 50));
+    logger.info('Session: %s, Content: "%s", Media: %s', sessionKey, content.substring(0, 50), media?.length ?? 0);
     
     const session = this.sessions.getOrCreate(sessionKey);
+    
+    // Build user content with optional image support
+    const userContent = media && media.length > 0
+      ? this.context._buildUserContent(content, media)
+      : content;
     
     const messages: Message[] = [
       {
@@ -108,7 +115,7 @@ export class AgentLoop {
       })),
       {
         role: "user",
-        content
+        content: typeof userContent === 'string' ? userContent : JSON.stringify(userContent)
       }
     ];
     

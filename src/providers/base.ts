@@ -22,11 +22,19 @@ export interface LLMResponse {
   usage: Record<string, number>;
 }
 
+/**
+ * Content part types for messages with images.
+ * Used when sending messages with image attachments.
+ */
+export type ContentPart = 
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface Message {
   /** Role of the message sender */
   role: "system" | "user" | "assistant" | "tool";
-  /** Content of the message */
-  content: string;
+  /** Content of the message - string or array of content parts (text + images) */
+  content: string | ContentPart[];
   /** Optional tool call ID (for tool messages) */
   toolCallId?: string;
   /** Optional tool name (for tool messages) */

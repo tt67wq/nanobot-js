@@ -34,7 +34,16 @@ interface AnthropicToolResultBlock {
   content: string;
 }
 
-type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock | AnthropicToolResultBlock;
+interface AnthropicImageBlock {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+    data: string;
+  };
+}
+
+type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock | AnthropicToolResultBlock | AnthropicImageBlock;
 
 /**
  * Anthropic message format
@@ -247,11 +256,30 @@ export class AnthropicProvider extends LLMProvider {
           ],
         });
       }
-      else {
-        anthropicMessages.push({
-          role: (role === "system" ? "user" : role) as "user" | "assistant",
-          content: content as AnthropicContentBlock[],
-        });
+      else if (Array.isArray(content)) {
+        // Handle ContentPart[] - for image support
+        const blocks: AnthropicContentBlock[] = [];
+        for (const part of content) {
+          if (part.type === "text") {
+            blocks.push({ type: "text", text: part.text } as AnthropicTextBlock);
+          } else if (part.type === "image_url") {
+            try {
+              const { media_type, data } = this._parseDataUrl(part.image_url.url);
+              blocks.push({
+                type: "image",
+                source: { type: "base64", media_type, data }
+              } as AnthropicImageBlock);
+            } catch {
+              // Skip invalid image URLs
+            }
+          }
+        }
+        if (blocks.length > 0) {
+          anthropicMessages.push({
+            role: (role === "system" ? "user" : role) as "user" | "assistant",
+            content: blocks,
+          });
+        }
       }
     }
 
@@ -320,6 +348,19 @@ export class AnthropicProvider extends LLMProvider {
     };
 
     return reasonMap[stopReason] || stopReason;
+  }
+
+  /**
+   * Parse data URL to extract media type and base64 data.
+   * @param url Data URL string (e.g., "data:image/png;base64,iVBOR...")
+   * @returns Object with media_type and data
+   */
+  private _parseDataUrl(url: string): { media_type: string; data: string } {
+    const match = url.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error("Invalid data URL");
+    }
+    return { media_type: match[1], data: match[2] };
   }
 
   /**
