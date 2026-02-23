@@ -1,12 +1,12 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-02-19
-**Commit:** 319f4cf
+**Generated:** 2026-02-23
+**Commit:** latest
 **Branch:** main
 
 ## OVERVIEW
 
-超轻量级个人 AI 助手，使用 Bun + TypeScript 实现。支持多 LLM 提供商 (Anthropic/OpenAI)、多通道集成 (飞书)、定时任务和心跳服务。
+超轻量级个人 AI 助手，使用 Bun + TypeScript 实现。支持多 LLM 提供商 (Anthropic/OpenAI)、多通道集成 (飞书)、定时任务和心跳服务。**支持图片理解 (Vision)**。
 
 ## STRUCTURE
 
@@ -14,7 +14,7 @@
 nanobot/
 ├── src/
 │   ├── agent/          # 核心 Agent 循环 (LLM ↔ 工具)
-│   ├── tools/          # 内置工具 (Shell/Web/FS/Spawn)
+│   ├── tools/          # 内置工具 (Shell/Web/FS/Spawn/Screenshot)
 │   ├── providers/      # LLM 提供商 (Anthropic/OpenAI)
 │   ├── channels/       # 通道集成 (飞书)
 │   ├── bus/            # 消息路由
@@ -34,11 +34,12 @@ nanobot/
 | 任务 | 位置 | 说明 |
 |------|------|------|
 | Agent 核心逻辑 | `src/agent/loop.ts` | Agent 主循环 |
+| 图片理解 | `src/agent/context.ts` | _buildUserContent() 图片转 base64 |
 | 工具实现 | `src/tools/*.ts` | Shell/Web/FS/Message 等 |
-| LLM 集成 | `src/providers/*.ts` | Anthropic/OpenAI |
+| LLM 集成 | `src/providers/*.ts` | Anthropic/OpenAI，含 Vision 支持 |
 | CLI 命令 | `src/cli/commands.ts` | 所有命令入口 |
 | 配置系统 | `src/config/schema.ts` | Zod 验证规则 |
-| 飞书集成 | `src/channels/feishu.ts` | WebSocket 消息 |
+| 飞书集成 | `src/channels/feishu.ts` | WebSocket 消息，图片处理 |
 
 ## CODE MAP
 
@@ -49,9 +50,9 @@ nanobot/
 | `MessageBus` | class | `src/bus/queue.ts` | 消息队列 |
 | `CronService` | class | `src/cron/service.ts` | 定时任务 |
 | `SessionManager` | class | `src/session/manager.ts` | 会话管理 |
-| `AnthropicProvider` | class | `src/providers/anthropic.ts` | Claude 集成 |
-| `OpenAIProvider` | class | `src/providers/openai.ts` | GPT 集成 |
-| `FeishuChannel` | class | `src/channels/feishu.ts` | 飞书消息 |
+| `AnthropicProvider` | class | `src/providers/anthropic.ts` | Claude 集成，Vision |
+| `OpenAIProvider` | class | `src/providers/openai.ts` | GPT/通义集成，Vision |
+| `FeishuChannel` | class | `src/channels/feishu.ts` | 飞书消息，图片下载 |
 
 ## CONVENTIONS
 
@@ -76,6 +77,17 @@ nanobot/
 - 配置使用 Zod 进行运行时验证
 - 会话数据存储为 JSONL 格式
 - Bootstrap 文件: `AGENTS.md`, `SOUL.md`, `USER.md`, `TOOLS.md`, `IDENTITY.md`
+- **图片理解**: 通过 base64 编码传递图片给 LLM
+
+## IMAGE VISION (图片理解)
+
+飞书通道支持图片理解：
+1. 收到图片消息 → 下载到本地临时目录
+2. 读取文件 → 转换为 base64 data URL
+3. 传递给 `ContextBuilder._buildUserContent()`
+4. Provider 转换为 API 兼容格式 (Anthropic/OpenAI)
+
+支持的模型: Claude (所有 vision 模型), GPT-4o, 通义千问等
 
 ## COMMANDS
 
