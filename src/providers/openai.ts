@@ -4,7 +4,12 @@
  * Supports OpenAI-compatible models including GPT, MiniMax, Azure OpenAI, etc.
  */
 
-import type { ChatOptions, LLMResponse, Tool, ToolDefinition, ToolCallRequest } from "./base";
+import type {
+  ChatOptions,
+  LLMResponse,
+  ToolDefinition,
+  ToolCallRequest,
+} from "./base";
 import { LLMProvider } from "./base";
 
 /**
@@ -17,7 +22,12 @@ const OPENAI_API_BASE = "https://api.openai.com/v1";
  */
 interface OpenAIMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | Array<{ type: "text"; text?: string } | { type: "image_url"; image_url?: { url: string } }>;
+  content:
+    | string
+    | Array<
+        | { type: "text"; text?: string }
+        | { type: "image_url"; image_url?: { url: string } }
+      >;
   tool_call_id?: string;
   name?: string;
 }
@@ -110,7 +120,8 @@ export class OpenAIProvider extends LLMProvider {
 
       return this._parseResponse(response);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       return {
         content: `Error calling OpenAI: ${errorMessage}`,
         toolCalls: [],
@@ -141,7 +152,9 @@ export class OpenAIProvider extends LLMProvider {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
 
-    const openaiMessages: OpenAIMessage[] = this._convertMessages(params.messages);
+    const openaiMessages: OpenAIMessage[] = this._convertMessages(
+      params.messages,
+    );
 
     const openaiTools: OpenAITool[] | undefined = params.tools
       ? this._convertTools(params.tools)
@@ -239,7 +252,9 @@ export class OpenAIProvider extends LLMProvider {
       }
     }
 
-    const reasoningDetails = (message as { reasoning_details?: Array<{ text: string }> }).reasoning_details;
+    const reasoningDetails = (
+      message as { reasoning_details?: Array<{ text: string }> }
+    ).reasoning_details;
     if (reasoningDetails && reasoningDetails.length > 0) {
       const thinkingContent = `[Thinking: ${reasoningDetails[0].text}]`;
       if (content) {
