@@ -367,9 +367,11 @@ export class FeishuChannel extends BaseChannel {
         mkdirSync(tempDir, { recursive: true });
       }
 
-      // Download image from Feishu
+      // Download image from Feishu - SDK requires image_key in path object
       const response = await this.apiClient.im.image.get({
-        image_key: imageKey,
+        path: {
+          image_key: imageKey,
+        },
       }) as any;
 
       // Determine file extension from content type
@@ -385,20 +387,9 @@ export class FeishuChannel extends BaseChannel {
         }
       }
 
-      // Save to temp file
+      // Save to temp file using SDK's writeFile method
       const imagePath = join(tempDir, `feishu_${imageKey}_${Date.now()}.${ext}`);
-      
-      // Handle response - may be buffer or blob
-      if (response.data) {
-        writeFileSync(imagePath, Buffer.from(response.data));
-      } else if (response.body) {
-        // Stream or blob
-        const arrayBuffer = await response.body.arrayBuffer();
-        writeFileSync(imagePath, Buffer.from(arrayBuffer));
-      } else {
-        this.log('error', 'Unexpected image response format');
-        return null;
-      }
+      await response.writeFile(imagePath);
 
       return imagePath;
 
