@@ -174,14 +174,9 @@ When remembering something, write to ${workspacePath}/memory/MEMORY.md`;
     // Current message (with optional image attachments)
     const userContent = this._buildUserContent(currentMessage, media);
     
-    // Since the standard Message type only accepts string content, and user content can be a complex object with image data,
-    // we convert to JSON string if userContent is an object/array 
-    // (This is a temporary workaround until Message interface is enhanced to support rich content)
-    const contentData = typeof userContent === 'string' ? userContent : JSON.stringify(userContent);
-    
     messages.push({ 
       role: "user", 
-      content: contentData
+      content: userContent
     });
 
     return messages;
@@ -198,8 +193,6 @@ When remembering something, write to ${workspacePath}/memory/MEMORY.md`;
     const images: MessageContent[] = [];
     for (const path of media) {
       try {
-        // Node doesn't have a direct mimetypes module like Python, 
-        // so we'll implement basic file type checking
         const mimeType = this._getMimeType(path);
         if (!this._isImageFile(path) || !mimeType.startsWith("image/")) {
           continue;
@@ -211,8 +204,7 @@ When remembering something, write to ${workspacePath}/memory/MEMORY.md`;
           type: "image_url", 
           image_url: { url: `data:${mimeType};base64,${base64Data}` } 
         });
-      } catch (error) {
-        // Skip invalid files
+      } catch {
         continue;
       }
     }

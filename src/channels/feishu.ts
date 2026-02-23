@@ -330,42 +330,22 @@ export class FeishuChannel extends BaseChannel {
 
       this.log('info', 'Image downloaded to: %s', imagePath);
 
-      // Upload image back to Feishu to get a accessible URL for the model
-      const imageUrl = await this.uploadImageForVision(imagePath);
-      
-      if (!imageUrl) {
-        this.log('error', 'Failed to upload image for vision, falling back to local path');
-        // Fallback to local path if upload fails
-        await this.handleMessage(
-          senderId,
-          chatId,
-          '[图片消息]',  // Brief text prompt
-          [imagePath],   // Media: image file path
-          {
-            message_id: message?.message_id,
-            create_time: message?.create_time,
-            event_type: data?.event_type,
-            msg_type: 'image',
-            image_key: imageKey,
-          }
-        );
-      } else {
-        this.log('info', 'Image uploaded for vision: %s', imageUrl);
-        // Use Feishu URL instead of local path
-        await this.handleMessage(
-          senderId,
-          chatId,
-          '[图片消息]',  // Brief text prompt
-          [imageUrl],   // Media: Feishu image URL
-          {
-            message_id: message?.message_id,
-            create_time: message?.create_time,
-            event_type: data?.event_type,
-            msg_type: 'image',
-            image_key: imageKey,
-          }
-        );
-      }
+      // Use local file path directly - ContextBuilder will convert to base64
+      // Note: Feishu URLs require authentication and cannot be accessed by external LLMs
+      this.log('info', 'Using local path for vision: %s', imagePath);
+      await this.handleMessage(
+        senderId,
+        chatId,
+        '[图片消息]',  // Brief text prompt
+        [imagePath],   // Media: local image file path
+        {
+          message_id: message?.message_id,
+          create_time: message?.create_time,
+          event_type: data?.event_type,
+          msg_type: 'image',
+          image_key: imageKey,
+        }
+      );
 
       this.log('debug', 'Image message forwarded to bus successfully');
 

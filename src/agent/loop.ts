@@ -115,7 +115,7 @@ export class AgentLoop {
       })),
       {
         role: "user",
-        content: typeof userContent === 'string' ? userContent : JSON.stringify(userContent)
+        content: userContent
       }
     ];
     
