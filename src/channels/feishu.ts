@@ -1,7 +1,7 @@
 import { BaseChannel } from './base';
 import type { MessageBus } from '../bus/queue';
 import type { OutboundMessage } from '../bus/events';
-import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, createReadStream } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 
@@ -317,10 +317,11 @@ export class FeishuChannel extends BaseChannel {
         return;
       }
 
-      this.log('info', 'Downloading image: %s', imageKey);
+      const messageId = message?.message_id;
+      this.log('info', 'Downloading image: %s, message_id: %s', imageKey, messageId);
 
-      // Download image from Feishu
-      const imagePath = await this.downloadImage(imageKey);
+      // Download image from Feishu - use messageResource API for message images
+      const imagePath = await this.downloadImage(imageKey, messageId);
 
       if (!imagePath) {
         this.log('error', 'Failed to download image');
@@ -329,20 +330,42 @@ export class FeishuChannel extends BaseChannel {
 
       this.log('info', 'Image downloaded to: %s', imagePath);
 
-      // Forward to bus with image path
-      await this.handleMessage(
-        senderId,
-        chatId,
-        '[图片消息]',  // Brief text prompt
-        [imagePath],   // Media: image file path
-        {
-          message_id: message?.message_id,
-          create_time: message?.create_time,
-          event_type: data?.event_type,
-          msg_type: 'image',
-          image_key: imageKey,
-        }
-      );
+      // Upload image back to Feishu to get a accessible URL for the model
+      const imageUrl = await this.uploadImageForVision(imagePath);
+      
+      if (!imageUrl) {
+        this.log('error', 'Failed to upload image for vision, falling back to local path');
+        // Fallback to local path if upload fails
+        await this.handleMessage(
+          senderId,
+          chatId,
+          '[图片消息]',  // Brief text prompt
+          [imagePath],   // Media: image file path
+          {
+            message_id: message?.message_id,
+            create_time: message?.create_time,
+            event_type: data?.event_type,
+            msg_type: 'image',
+            image_key: imageKey,
+          }
+        );
+      } else {
+        this.log('info', 'Image uploaded for vision: %s', imageUrl);
+        // Use Feishu URL instead of local path
+        await this.handleMessage(
+          senderId,
+          chatId,
+          '[图片消息]',  // Brief text prompt
+          [imageUrl],   // Media: Feishu image URL
+          {
+            message_id: message?.message_id,
+            create_time: message?.create_time,
+            event_type: data?.event_type,
+            msg_type: 'image',
+            image_key: imageKey,
+          }
+        );
+      }
 
       this.log('debug', 'Image message forwarded to bus successfully');
 
@@ -353,8 +376,9 @@ export class FeishuChannel extends BaseChannel {
 
   /**
    * Download image from Feishu API and save to temp directory
+   * For message images, use messageResource API with message_id
    */
-  private async downloadImage(imageKey: string): Promise<string | null> {
+  private async downloadImage(imageKey: string, messageId?: string): Promise<string | null> {
     if (!this.apiClient) {
       this.log('error', 'API client not initialized');
       return null;
@@ -367,12 +391,38 @@ export class FeishuChannel extends BaseChannel {
         mkdirSync(tempDir, { recursive: true });
       }
 
-      // Download image from Feishu - SDK requires image_key in path object
-      const response = await this.apiClient.im.image.get({
-        path: {
-          image_key: imageKey,
-        },
-      }) as any;
+      let response: any;
+
+      // Use messageResource API if we have message_id (for message images)
+      if (messageId) {
+        this.log('debug', 'Using im.messageResource.get API with message_id: %s', messageId);
+        response = await this.apiClient.im.messageResource.get({
+          path: {
+            message_id: messageId,
+            file_key: imageKey,
+          },
+          params: {
+            type: 'image',
+          },
+        });
+      } else {
+        // Fallback to image API for uploaded images
+        this.log('debug', 'Using im.image.get API with image_key: %s', imageKey);
+        response = await this.apiClient.im.image.get({
+          path: {
+            image_key: imageKey,
+          },
+        });
+      }
+
+      // Check for API error response
+      this.log('debug', 'Response keys: %s', Object.keys(response));
+      
+      // If response has code field, check if it's an error
+      if (response.code !== undefined && response.code !== 0) {
+        this.log('error', 'Feishu API error: code=%s, msg=%s', response.code, response.msg);
+        return null;
+      }
 
       // Determine file extension from content type
       let ext = 'png';
@@ -389,12 +439,79 @@ export class FeishuChannel extends BaseChannel {
 
       // Save to temp file using SDK's writeFile method
       const imagePath = join(tempDir, `feishu_${imageKey}_${Date.now()}.${ext}`);
-      await response.writeFile(imagePath);
+      
+      // Handle different response formats
+      if (response.data && Buffer.isBuffer(response.data)) {
+        // Data is in response.data as Buffer
+        writeFileSync(imagePath, response.data);
+      } else if (typeof response.writeFile === 'function') {
+        // Use SDK's writeFile method
+        await response.writeFile(imagePath);
+      } else if (typeof response.getReadableStream === 'function') {
+        // Use readable stream
+        const stream = response.getReadableStream();
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        writeFileSync(imagePath, Buffer.concat(chunks));
+      } else {
+        this.log('error', 'Unexpected image response format, keys: %s', Object.keys(response));
+        return null;
+      }
 
       return imagePath;
 
     } catch (e: any) {
       this.log('error', 'Failed to download image: %s', e?.message || e);
+      return null;
+    }
+  }
+
+  /**
+   * Upload image to Feishu and return accessible URL for vision models
+   * DashScope doesn't support base64, so we upload to Feishu and use their URL
+   */
+  private async uploadImageForVision(imagePath: string): Promise<string | null> {
+    if (!this.apiClient) {
+      this.log('error', 'API client not initialized');
+      return null;
+    }
+
+    try {
+      this.log('debug', 'Uploading image to Feishu for vision: %s', imagePath);
+
+      // Upload to Feishu - SDK expects a Readable stream, not Buffer
+      const response = await this.apiClient.im.image.create({
+        data: {
+          image_type: 'message',
+          image: createReadStream(imagePath) as any,
+        },
+      }) as any;
+
+      // Check for API error
+      this.log('debug', 'Upload response: %s', JSON.stringify(response));
+      
+      if (response.code !== undefined && response.code !== 0) {
+        this.log('error', 'Failed to upload image to Feishu: code=%s, msg=%s', response.code, response.msg);
+        return null;
+      }
+
+      // Get image_key from response - SDK may return directly or wrapped in data
+      const imageKey = response.data?.image_key || response.image_key;
+      if (!imageKey) {
+        this.log('error', 'No image_key returned from Feishu upload, response: %s', JSON.stringify(response));
+        return null;
+      }
+
+      // Build Feishu image URL
+      const imageUrl = `https://open.feishu.cn/open-apis/im/v1/images/${imageKey}`;
+      this.log('debug', 'Image uploaded, URL: %s', imageUrl);
+
+      return imageUrl;
+
+    } catch (e: any) {
+      this.log('error', 'Failed to upload image for vision: %s', e?.message || e);
       return null;
     }
   }
