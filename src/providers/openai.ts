@@ -208,13 +208,13 @@ export class OpenAIProvider extends LLMProvider {
         openaiMsg.tool_call_id = msg.toolCallId;
         openaiMsg.name = msg.toolName;
       }
-      
+
       // 转换 assistant 消息中的 tool_calls
       if (msg.role === "assistant" && msg.tool_calls) {
-        openaiMsg.tool_calls = msg.tool_calls.map(tc => ({
+        openaiMsg.tool_calls = msg.tool_calls.map((tc) => ({
           id: tc.id,
           type: tc.type,
-          function: tc.function
+          function: tc.function,
         }));
       }
 
