@@ -6,4 +6,5 @@ export { WebSearchTool, WebFetchTool } from './web';
 export { MessageTool } from './message';
 export { SpawnTool } from './spawn';
 export { ScreenshotTool } from './screenshot';
+export { ClearContextTool } from './cleanup';
 export { MCPToolAdapter, MCPResourceTool, MCPServerInfoTool } from './mcp';

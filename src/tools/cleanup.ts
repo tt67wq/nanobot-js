@@ -1,6 +1,6 @@
 import { Tool } from "../providers/base";
 import { ContextCleaner } from "../session/cleanup";
-import type { Session } from "../session/session";
+import type { SessionManager } from "../session/manager";
 
 /**
  * Tool to clear or compress conversation context to free up token space.
@@ -17,6 +17,11 @@ export class ClearContextTool extends Tool {
   parameters = {
     type: "object",
     properties: {
+      session_key: {
+        type: "string",
+        description: "Session key to clear (optional, defaults to current session)",
+        default: "",
+      },
       mode: {
         type: "string",
         enum: ["clear", "compress", "smart"],
@@ -34,39 +39,49 @@ export class ClearContextTool extends Tool {
 
   constructor(
     private cleaner: ContextCleaner,
-    private session: Session
+    private sessionManager: SessionManager,
+    private getCurrentSessionKey: () => string
   ) {
     super();
   }
 
   async execute(params: Record<string, unknown>): Promise<string> {
+    // Get session key - use provided or fall back to current session
+    const sessionKey = (params.session_key as string) || this.getCurrentSessionKey();
+    if (!sessionKey) {
+      return "Error: No session key available. Please provide session_key parameter.";
+    }
+    
+    // Get or create the session
+    const session = this.sessionManager.getOrCreate(sessionKey);
+    
     // Validate and normalize parameters
     const mode = this.validateMode(params.mode);
     const keepRecent = this.validateKeepRecent(params.keep_recent);
-
+    
     // Perform cleanup
-    const result = await this.cleaner.cleanup(this.session, {
+    const result = await this.cleaner.cleanup(session, {
       mode,
       force: true,
     });
-
+    
     // Build response
     const lines: string[] = [
       `Cleanup ${result.cleaned ? "successful" : "skipped"}`,
       `Mode: ${mode}`,
       `Action: ${result.action}`,
     ];
-
+    
     if (result.cleaned) {
       lines.push(`Messages removed: ${result.messages_removed}`);
       lines.push(`Messages kept: ${result.messages_kept}`);
-
+      
       if (result.summary) {
         lines.push("");
         lines.push("Summary:");
         lines.push(result.summary);
       }
-
+      
       if (result.key_info && result.key_info.length > 0) {
         lines.push("");
         lines.push("Key information extracted:");
@@ -75,7 +90,7 @@ export class ClearContextTool extends Tool {
         }
       }
     }
-
+    
     return lines.join("\n");
   }
 

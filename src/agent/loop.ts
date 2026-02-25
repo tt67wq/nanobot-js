@@ -1,10 +1,11 @@
 import { ToolRegistry } from "../tools/registry";
 import { ContextBuilder } from "./context";
 import { SkillsLoader } from "./skills";
-import { WebSearchTool, WebFetchTool, ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, ExecTool, MessageTool, SpawnTool, ScreenshotTool } from "../tools";
+import { WebSearchTool, WebFetchTool, ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, ExecTool, MessageTool, SpawnTool, ScreenshotTool, ClearContextTool } from "../tools";
 import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
+import { ContextCleaner } from "../session/cleanup";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Logger } from "../utils/logger";
@@ -24,9 +25,11 @@ export class AgentLoop {
   private tools: ToolRegistry;
   private context: ContextBuilder;
   private sessions: SessionManager;
+  private contextCleaner!: ContextCleaner;
   private model: string;
   private maxIterations: number;
   private verbose: boolean = true;
+  private currentSessionKey: string = "cli:direct";
   
   constructor(
     private provider: LLMProvider,
@@ -60,7 +63,7 @@ export class AgentLoop {
     logger.debug('Found %d available skills:', availableSkills.length);
     
     const alwaysSkills = skillsLoader.get_always_skills();
-    logger.debug('Always-loaded skills: %s', alwaysSkills);
+    logger.debug('Always loaded skills: %s', alwaysSkills);
     
     this.context = new ContextBuilder(workspace, null, skillsLoader);
     logger.debug('SkillsLoader passed to ContextBuilder');
@@ -73,6 +76,24 @@ export class AgentLoop {
   }
 
   private _registerDefaultTools(): void {
+    // Create context cleaner with default config
+    this.contextCleaner = new ContextCleaner({
+      enabled: true,
+      max_tokens: 100000,
+      max_messages: 100,
+      keep_recent: 20,
+      mode: 'smart',
+      compress_model: this.model,
+    }, this.provider, null);
+    
+    // Register ClearContextTool with callback to get current session
+    this.tools.register(new ClearContextTool(
+      this.contextCleaner,
+      this.sessions,
+      () => this.currentSessionKey
+    ));
+    
+    // Register other tools
     this.tools.register(new WebSearchTool());
     this.tools.register(new WebFetchTool());
     this.tools.register(new ReadFileTool());
@@ -94,6 +115,9 @@ export class AgentLoop {
     sessionKey: string = "cli:direct",
     media?: string[]
   ): Promise<string> {
+    // Update current session key for ClearContextTool
+    this.currentSessionKey = sessionKey;
+    
     logger.info('=== processDirect() called ===');
     logger.info('Session: %s, Content: "%s", Media: %s', sessionKey, content.substring(0, 50), media?.length ?? 0);
     
