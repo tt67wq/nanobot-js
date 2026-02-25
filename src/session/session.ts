@@ -71,6 +71,62 @@ export class Session {
   }
 
   /**
+   * Get the total number of messages in the session.
+   * 
+   * @returns Total message count
+   */
+  getMessagesCount(): number {
+    return this.messages.length;
+  }
+
+  /**
+   * Get ALL messages in the session (not limited to recent 50).
+   * 
+   * @returns Array of all session messages
+   */
+  getAllMessages(): SessionMessage[] {
+    return [...this.messages];
+  }
+
+  /**
+   * Remove the earliest N messages from the session.
+   * 
+   * @param count - Number of earliest messages to remove
+   * @returns Array of removed messages
+   */
+  removeMessages(count: number): SessionMessage[] {
+    if (count <= 0 || this.messages.length === 0) {
+      return [];
+    }
+    const removeCount = Math.min(count, this.messages.length);
+    const removed = this.messages.splice(0, removeCount);
+    this.updatedAt = new Date();
+    return removed;
+  }
+
+  /**
+   * Remove all messages before a given timestamp.
+   * 
+   * @param timestamp - ISO timestamp string (messages before this will be removed)
+   * @returns Array of removed messages
+   */
+  removeMessagesBefore(timestamp: string): SessionMessage[] {
+    if (!timestamp || this.messages.length === 0) {
+      return [];
+    }
+    const targetTime = new Date(timestamp).getTime();
+    const removeIndex = this.messages.findIndex(
+      (m) => new Date(m.timestamp).getTime() >= targetTime
+    );
+    if (removeIndex <= 0) {
+      return [];
+    }
+    const removed = this.messages.splice(0, removeIndex);
+    this.updatedAt = new Date();
+    return removed;
+  }
+
+  /**
    * Serialize session to SessionData.
    * 
    * @returns Session data object

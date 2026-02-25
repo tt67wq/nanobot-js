@@ -2,6 +2,7 @@ import { z } from "zod";
 import { homedir } from "os";
 import { join } from "path";
 
+
 // Feishu (飞书) configuration
 export const FeishuConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -131,7 +132,17 @@ export const LoggerConfigSchema = z.object({
 });
 
 export type LoggerConfig = z.infer<typeof LoggerConfigSchema>;
+// Context Cleanup 配置
+export const ContextCleanupConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  max_tokens: z.number().int().default(100000),
+  max_messages: z.number().int().default(100),
+  keep_recent: z.number().int().default(20),
+  mode: z.enum(['clear', 'compress', 'smart']).default('smart'),
+  compress_model: z.string().default('anthropic/claude-sonnet-4-20250514'),
+});
 
+export type ContextCleanupConfig = z.infer<typeof ContextCleanupConfigSchema>;
 export const ConfigSchema = z.object({
   agents: AgentsConfigSchema.default(() => AgentsConfigSchema.parse({})),
   channels: ChannelsConfigSchema.default(() => ChannelsConfigSchema.parse({})),
@@ -140,8 +151,8 @@ export const ConfigSchema = z.object({
   tools: ToolsConfigSchema.default(() => ToolsConfigSchema.parse({})),
   mcp: MCPConfigSchema.default(() => MCPConfigSchema.parse({})),
   logger: LoggerConfigSchema.default(() => LoggerConfigSchema.parse({})),
+  context_cleanup: ContextCleanupConfigSchema.default(() => ContextCleanupConfigSchema.parse({})),
 });
-
 export type ConfigType = z.infer<typeof ConfigSchema>;
 
 export class Config {
@@ -152,7 +163,7 @@ export class Config {
   public tools: ToolsConfig;
   public mcp: MCPConfig;
   public logger: LoggerConfig;
-
+  public contextCleanup: ContextCleanupConfig;
   constructor(config: Partial<ConfigType> = {}) {
     const parsed = ConfigSchema.parse(config);
     this.agents = parsed.agents;
@@ -162,8 +173,8 @@ export class Config {
     this.tools = parsed.tools;
     this.mcp = parsed.mcp;
     this.logger = parsed.logger;
+    this.contextCleanup = parsed.context_cleanup;
   }
-
   // Expands ~ to home directory
   get workspacePath(): string {
     let workspace = this.agents.defaults.workspace;
