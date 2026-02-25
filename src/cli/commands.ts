@@ -337,6 +337,7 @@ cronCmd
   .requiredOption("-m, --message <message>", "Message for agent")
   .option("-e, --every <seconds>", "Run every N seconds")
   .option("-c, --cron <expression>", 'Cron expression (e.g. "0 9 * * *")')
+  .option("-a, --at <datetime>", 'Run at specific time (e.g. "2026-01-26 21:15:00")')
   .option("-d, --deliver", "Deliver response to channel")
   .option("--to <recipient>", "Recipient for delivery")
   .option("--channel <channel>", "Channel for delivery")
@@ -355,8 +356,15 @@ cronCmd
       schedule = { kind: "every", everyMs: parseInt(options.every) * 1000 };
     } else if (options.cron) {
       schedule = { kind: "cron", expr: options.cron };
+    } else if (options.at) {
+      const atMs = new Date(options.at).getTime();
+      if (isNaN(atMs)) {
+        console.log(chalk.red("Error: Invalid date format for --at"));
+        process.exit(1);
+      }
+      schedule = { kind: "at", atMs };
     } else {
-      console.log(chalk.red("Error: Must specify --every or --cron"));
+      console.log(chalk.red("Error: Must specify --every, --cron, or --at"));
       process.exit(1);
     }
 
