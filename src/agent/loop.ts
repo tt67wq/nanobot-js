@@ -109,10 +109,30 @@ export class AgentLoop {
         role: "system",
         content: this.context.buildSystemPrompt()
       },
-      ...session.getHistory().map(m => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content
-      })),
+      ...session.getHistory()
+        .filter(m => {
+          // 过滤掉包含 tool_calls 标记的无效 assistant 消息
+          if (m.role === 'assistant' && typeof m.content === 'string' && 
+              (m.content.includes('<|tool_calls_section_begin|>') || 
+               m.content.includes('<|tool_call_begin|>') ||
+               m.content.includes('<|function:') ||
+               m.content.includes('<|assistant|>') ||
+               m.content.includes('<|user|>') ||
+               m.content.includes('<|system|>') ||
+               m.content.includes('<|context|>') ||
+               m.content.includes('<|observation|>') ||
+               m.content.includes('<|message|>') ||
+               m.content.includes('<|repo_info|>') ||
+               m.content.includes('<|file_search_results|>') ||
+               m.content.includes('<|code_interpreter'))) {
+            return false;
+          }
+          return true;
+        })
+        .map(m => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content
+        })),
       {
         role: "user",
         content: userContent
@@ -132,12 +152,18 @@ export class AgentLoop {
       });
       
       if (response.toolCalls && response.toolCalls.length > 0) {
-        // Add assistant message with tool calls
+        // Add assistant message with tool calls - 必须包含 tool_calls 字段
         messages.push({
           role: "assistant",
           content: response.content ?? "",
-          toolCallId: response.toolCalls[0].id,
-          toolName: response.toolCalls[0].name
+          tool_calls: response.toolCalls.map(tc => ({
+            id: tc.id,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
+            }
+          }))
         } as Message);
         
         // Execute tools

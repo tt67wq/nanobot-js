@@ -33,12 +33,21 @@ export type ContentPart =
 export interface Message {
   /** Role of the message sender */
   role: "system" | "user" | "assistant" | "tool";
-  /** Content of the message - string or array of content parts (text + images) */
-  content: string | ContentPart[];
+  /** Content of the message */
+  content: any;
   /** Optional tool call ID (for tool messages) */
   toolCallId?: string;
   /** Optional tool name (for tool messages) */
   toolName?: string;
+  /** Optional tool calls (for assistant messages) */
+  tool_calls?: Array<{
+    id: string;
+    type: string;
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
 }
 
 export interface ChatOptions {

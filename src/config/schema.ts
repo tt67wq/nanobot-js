@@ -81,23 +81,34 @@ export const ToolsConfigSchema = z.object({
 
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 
+// MCP 配置
 export const MCPAuthConfigSchema = z.object({
-  type: z.string().default("bearer"),
-  token: z.string().default(""),
-  token_env: z.string().default(""),
-  api_key: z.string().default(""),
-  key_env: z.string().default(""),
+  type: z.enum(['none', 'bearer', 'api_key']).default('none'),
+  token: z.string().default(''),
+  token_env: z.string().default(''),
+  api_key: z.string().default(''),
+  key_env: z.string().default(''),
 });
 
 export type MCPAuthConfig = z.infer<typeof MCPAuthConfigSchema>;
 
 export const MCPServerConfigSchema = z.object({
-  name: z.string().default(""),
-  url: z.string().default(""),
+  name: z.string().default(''),
+  // 传输方式: stdio (本地进程) / http (远程服务器)
+  transport: z.enum(['stdio', 'http', 'sse']).default('http'),
+  // HTTP 传输用
+  url: z.string().optional(),
+  // Stdio 传输用
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().optional(),
+  // 通用配置
   enabled: z.boolean().default(true),
   auth: MCPAuthConfigSchema.default(() => MCPAuthConfigSchema.parse({})),
-  timeout: z.number().int().default(30),
+  timeout: z.number().int().default(30000),
   retry_attempts: z.number().int().default(3),
+  retry_delay: z.number().int().default(1000),
+  // 环境变量
   env: z.record(z.string()).default({}),
   env_file: z.string().nullable().default(null),
   secure_env: z.array(z.string()).default([]),
