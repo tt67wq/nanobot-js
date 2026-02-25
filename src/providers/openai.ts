@@ -219,8 +219,6 @@ export class OpenAIProvider extends LLMProvider {
       }
 
       return openaiMsg;
-
-      return openaiMsg;
     });
   }
 
