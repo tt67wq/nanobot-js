@@ -102,7 +102,10 @@ agentCmd
 
     const agent = new AgentLoop(provider, config.workspacePath, {
       model: config.agents.defaults.model,
-      maxIterations: config.agents.defaults.max_tool_iterations, thinking: config.agents.defaults.thinking,
+      maxIterations: config.agents.defaults.max_tool_iterations,
+      thinking: config.agents.defaults.thinking,
+      bus,
+      braveApiKey: config.tools?.web?.search?.api_key,
     });
 
     // Parse image paths
@@ -167,7 +170,10 @@ gatewayCmd
 
     const agent = new AgentLoop(provider, config.workspacePath, {
       model: config.agents.defaults.model,
-      maxIterations: config.agents.defaults.max_tool_iterations, thinking: config.agents.defaults.thinking,
+      maxIterations: config.agents.defaults.max_tool_iterations,
+      thinking: config.agents.defaults.thinking,
+      bus,
+      braveApiKey: config.tools?.web?.search?.api_key,
     });
 
     const cronStorePath = join(getDataDir(), "cron", "jobs.json");
@@ -228,6 +234,28 @@ gatewayCmd
           try {
             // 等待并读取入站消息
             const inboundMsg = await bus.consumeInbound();
+            
+            // 处理 subagent 完成通知
+            if (inboundMsg.senderId === 'subagent') {
+              console.log(
+                "[Gateway:INFO] Received subagent notification:",
+                inboundMsg.content.substring(0, 100),
+              );
+              
+              // 解析 chatId 格式为 "channel:chatId"
+              const [channel, chatId] = inboundMsg.chatId.split(':');
+              
+              // 发送通知到渠道
+              await bus.publishOutbound({
+                channel: channel || 'feishu',
+                chatId: chatId || inboundMsg.chatId,
+                content: inboundMsg.content,
+                replyTo: inboundMsg.metadata?.message_id as string | undefined,
+                metadata: inboundMsg.metadata,
+              });
+              continue;
+            }
+            
             console.log(
               "[Gateway:DEBUG] Received inbound message:",
               inboundMsg.content.substring(0, 50),
@@ -292,6 +320,8 @@ gatewayCmd
               maxIterations: config.agents.defaults.max_tool_iterations,
               thinking: config.agents.defaults.thinking,
               onProgress: progressHandler,
+              bus,
+              braveApiKey: config.tools?.web?.search?.api_key,
             });
 
             // 调用 AgentLoop 处理消息

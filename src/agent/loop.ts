@@ -1,6 +1,8 @@
 import { ToolRegistry } from "../tools/registry";
 import { ContextBuilder } from "./context";
 import { SkillsLoader } from "./skills";
+import { SubagentManager } from "./subagent";
+import type { MessageBus } from "../bus/queue";
 import { WebSearchTool, WebFetchTool, ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, ExecTool, MessageTool, SpawnTool, ScreenshotTool, ClearContextTool } from "../tools";
 import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
@@ -40,6 +42,10 @@ export interface AgentLoopOptions {
   thinking?: boolean;
   /** 进度回调函数 - 在工具执行时通知外部 */
   onProgress?: (event: ProgressEvent) => void;
+  /** 消息总线 - 用于 subagent 通知 */
+  bus?: MessageBus;
+  /** Brave API Key - 用于 subagent 的 web 搜索 */
+  braveApiKey?: string;
 }
 
 export class AgentLoop {
@@ -53,6 +59,7 @@ export class AgentLoop {
   private currentSessionKey: string = "cli:direct";
   private thinking: boolean = false;
   private onProgress?: (event: ProgressEvent) => void;
+  private subagentManager?: SubagentManager;
   
   constructor(
     private provider: LLMProvider,
@@ -70,6 +77,17 @@ export class AgentLoop {
     this.verbose = options?.verbose ?? true;
     this.thinking = options?.thinking ?? false;
     this.onProgress = options?.onProgress;
+    
+    // 初始化 SubagentManager
+    if (options?.bus) {
+      this.subagentManager = new SubagentManager({
+        provider,
+        workspace,
+        bus: options.bus,
+        model: this.model,
+        braveApiKey: options.braveApiKey,
+      });
+    }
     
     const builtinSkillsDir = process.env.NANOBOT_BUILTIN_SKILLS || join(__dirname, "../skills");
     logger.debug('Creating SkillsLoader...');
@@ -128,7 +146,20 @@ export class AgentLoop {
     this.tools.register(new ListDirTool());
     this.tools.register(new ExecTool());
     this.tools.register(new MessageTool());
-    this.tools.register(new SpawnTool());
+    
+    // Register SpawnTool with callback to SubagentManager
+    const spawnTool = new SpawnTool();
+    if (this.subagentManager) {
+      spawnTool.setSpawnCallback((task, opts) => 
+        this.subagentManager!.spawn(task, { 
+          label: opts?.label,
+          originChannel: 'gateway',
+          originChatId: this.currentSessionKey 
+        })
+      );
+    }
+    this.tools.register(spawnTool);
+    
     this.tools.register(new ScreenshotTool());
   }
 
