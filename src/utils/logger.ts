@@ -10,6 +10,7 @@
  */
 
 import { homedir } from "os";
+import { appendFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
 /** Log level enum */
@@ -187,11 +188,10 @@ export class Logger {
       return;
     }
 
+    let line: string;
+    
     if (this.format === 'json') {
-      const line = JSON.stringify(entry);
-      if (this.output === 'console' || this.output === 'both') {
-        console.log(line);
-      }
+      line = JSON.stringify(entry);
     } else {
       // Pretty format
       const prefix = `[${entry.module}:${entry.level}]`;
@@ -200,10 +200,12 @@ export class Logger {
       const message = entry.error 
         ? `${entry.message}\n  Error: ${entry.error.message}\n  Stack: ${entry.error.stack}`
         : entry.message;
-      
-      const line = `${color}${prefix}${this.resetColor()} ${message}`;
-      
-      if (this.output === 'console' || this.output === 'both') {
+      line = `${color}${prefix}${this.resetColor()} ${message}`;
+    }
+
+    // Output to console
+    if (this.output === 'console' || this.output === 'both') {
+      if (this.format !== 'json') {
         if (entry.level === 'ERROR') {
           console.error(line);
         } else if (entry.level === 'WARN') {
@@ -211,6 +213,24 @@ export class Logger {
         } else {
           console.log(line);
         }
+      } else {
+        console.log(line);
+      }
+    }
+
+    // Output to file
+    if ((this.output === 'file' || this.output === 'both') && this.filePath) {
+      try {
+        // Ensure directory exists
+        const dir = this.filePath.substring(0, this.filePath.lastIndexOf('/'));
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        // Append to file (plain text, no colors)
+        const plainLine = this.format === 'json' ? line : `[${entry.module}:${entry.level}] ${entry.message}`;
+        appendFileSync(this.filePath, plainLine + '\n');
+      } catch (e) {
+        console.error('[Logger] Failed to write to file:', e);
       }
     }
   }
