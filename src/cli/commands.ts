@@ -18,6 +18,7 @@ import { HeartbeatService } from "../heartbeat/service";
 import { AnthropicProvider } from "../providers/anthropic";
 import { OpenAIProvider } from "../providers/openai";
 import chalk from "chalk";
+import { Logger, LogLevel } from "../utils/logger";
 
 const VERSION = "0.1.0";
 const LOGO = `
@@ -146,8 +147,23 @@ gatewayCmd
   .option("-p, --port <port>", "Gateway port", "18790")
   .option("-v, --verbose", "Verbose output")
   .action(async (options) => {
+    // 配置日志文件
+    const logDir = join(getDataDir(), "logs");
+    if (!existsSync(logDir)) {
+      mkdirSync(logDir, { recursive: true });
+    }
+    const logFile = join(logDir, `gateway-${new Date().toISOString().split('T')[0]}.log`);
+    
+    // 配置 Logger
+    const rootLogger = new Logger({
+      level: options.verbose ? LogLevel.DEBUG : LogLevel.INFO,
+      output: 'both',
+      filePath: logFile,
+    });
+    
     console.log(LOGO);
     console.log(`Starting nanobot gateway on port ${options.port}...\n`);
+    console.log(chalk.gray(`Logs: ${logFile}`));
 
     const config = loadConfig();
     const bus = new MessageBus();
