@@ -3,6 +3,7 @@ import type { MessageBus } from '../bus/queue';
 import type { OutboundMessage } from '../bus/events';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, createReadStream } from 'fs';
 import { join, dirname } from 'path';
+import { markdownToFeishu } from '../utils/markdownToFeishu';
 import { tmpdir } from 'os';
 
 interface FeishuConfig {
@@ -260,7 +261,7 @@ export class FeishuChannel extends BaseChannel {
     try {
       const cardContent = JSON.stringify({
         config: { wide_screen_mode: true },
-        elements: [{ tag: 'markdown', content: msg.content }],
+        elements: [{ tag: 'markdown', content: markdownToFeishu(msg.content) }],
       });
 
       const response = await this.apiClient.im.message.create({
