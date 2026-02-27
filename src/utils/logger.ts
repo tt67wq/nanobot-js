@@ -7,6 +7,7 @@
  * - Child loggers for module namespacing
  * - Error serialization with stack trace
  * - Environment variable override
+ * - Global configuration for centralized logging
  */
 
 import { homedir } from "os";
@@ -50,6 +51,24 @@ export interface LogEntry {
 /** Default log directory */
 const LOG_DIR = join(homedir(), '.nanobot', 'logs');
 
+/** Global logger configuration - set by gateway */
+let globalConfig: LoggerOptions = {};
+
+/**
+ * Set global logger configuration
+ * All loggers created after this will inherit these settings
+ */
+export function configureLogger(options: LoggerOptions): void {
+  globalConfig = { ...options };
+}
+
+/**
+ * Get current global logger configuration
+ */
+export function getLoggerConfig(): LoggerOptions {
+  return { ...globalConfig };
+}
+
 /**
  * Logger class with level filtering and format options
  */
@@ -61,29 +80,33 @@ export class Logger {
   private filePath?: string;
 
   constructor(options: LoggerOptions = {}) {
-    // Level: env override > options > default
+    // Level: env override > options > globalConfig > default
     const envLevel = process.env.NANOBOT_LOG_LEVEL?.toLowerCase();
     if (envLevel) {
       this.level = Logger.parseLevel(envLevel);
     } else if (options.level !== undefined) {
-      this.level = typeof options.level === 'string' 
-        ? Logger.parseLevel(options.level) 
+      this.level = typeof options.level === 'string'
+        ? Logger.parseLevel(options.level)
         : options.level;
+    } else if (globalConfig.level !== undefined) {
+      this.level = typeof globalConfig.level === 'string'
+        ? Logger.parseLevel(globalConfig.level)
+        : globalConfig.level;
     } else {
       this.level = LogLevel.INFO;
     }
 
-    // Format: env override > options > default
+    // Format: env override > options > globalConfig > default
     const envFormat = process.env.NANOBOT_LOG_FORMAT?.toLowerCase();
     if (envFormat === 'json' || envFormat === 'pretty') {
       this.format = envFormat;
     } else {
-      this.format = options.format || 'pretty';
+      this.format = options.format || globalConfig.format || 'pretty';
     }
 
-    // Output
-    this.output = options.output || 'console';
-    this.filePath = options.filePath;
+    // Output: options > globalConfig > default
+    this.output = options.output || globalConfig.output || 'console';
+    this.filePath = options.filePath || globalConfig.filePath;
     this.module = options.module || 'APP';
   }
 
@@ -122,6 +145,13 @@ export class Logger {
 
   /** Check if level should be logged */
   private shouldLog(level: LogLevel): boolean {
+    // Also check global config level for dynamic adjustment
+    if (globalConfig.level !== undefined) {
+      const globalLevel = typeof globalConfig.level === 'string' 
+        ? Logger.parseLevel(globalConfig.level) 
+        : globalConfig.level;
+      return level >= globalLevel;
+    }
     return level >= this.level;
   }
 
@@ -180,8 +210,13 @@ export class Logger {
     return entry;
   }
 
-  /** Output to console or file */
+  /** Output to console or file - uses global config dynamically */
   private outputLog(entry: LogEntry): void {
+    // Use global config values if set (for file output)
+    const effectiveOutput = globalConfig.output || this.output;
+    const effectiveFilePath = globalConfig.filePath || this.filePath;
+    const effectiveFormat = globalConfig.format || this.format;
+
     // Logger self-protection: prevent infinite recursion
     if (entry.module === 'APP:UTILS' && entry.message.includes('Logger')) {
       console.error('[Logger] Error in Logger itself:', entry.error?.message);
@@ -190,7 +225,7 @@ export class Logger {
 
     let line: string;
     
-    if (this.format === 'json') {
+    if (effectiveFormat === 'json') {
       line = JSON.stringify(entry);
     } else {
       // Pretty format
@@ -204,8 +239,8 @@ export class Logger {
     }
 
     // Output to console
-    if (this.output === 'console' || this.output === 'both') {
-      if (this.format !== 'json') {
+    if (effectiveOutput === 'console' || effectiveOutput === 'both') {
+      if (effectiveFormat !== 'json') {
         if (entry.level === 'ERROR') {
           console.error(line);
         } else if (entry.level === 'WARN') {
@@ -219,16 +254,16 @@ export class Logger {
     }
 
     // Output to file
-    if ((this.output === 'file' || this.output === 'both') && this.filePath) {
+    if ((effectiveOutput === 'file' || effectiveOutput === 'both') && effectiveFilePath) {
       try {
         // Ensure directory exists
-        const dir = this.filePath.substring(0, this.filePath.lastIndexOf('/'));
+        const dir = effectiveFilePath.substring(0, effectiveFilePath.lastIndexOf('/'));
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
         }
         // Append to file (plain text, no colors)
-        const plainLine = this.format === 'json' ? line : `[${entry.module}:${entry.level}] ${entry.message}`;
-        appendFileSync(this.filePath, plainLine + '\n');
+        const plainLine = effectiveFormat === 'json' ? line : `[${entry.module}:${entry.level}] ${entry.message}`;
+        appendFileSync(effectiveFilePath, plainLine + '\n');
       } catch (e) {
         console.error('[Logger] Failed to write to file:', e);
       }

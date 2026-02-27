@@ -18,7 +18,7 @@ import { HeartbeatService } from "../heartbeat/service";
 import { AnthropicProvider } from "../providers/anthropic";
 import { OpenAIProvider } from "../providers/openai";
 import chalk from "chalk";
-import { Logger, LogLevel } from "../utils/logger";
+import { Logger, LogLevel, configureLogger } from "../utils/logger";
 
 const VERSION = "0.1.0";
 const LOGO = `
@@ -146,7 +146,7 @@ const gatewayCmd = program
 gatewayCmd
   .option("-p, --port <port>", "Gateway port", "18790")
   .option("-v, --verbose", "Verbose output")
-  .action(async (options) => {
+.action(async (options) => {
     // 配置日志文件
     const logDir = join(getDataDir(), "logs");
     if (!existsSync(logDir)) {
@@ -154,8 +154,8 @@ gatewayCmd
     }
     const logFile = join(logDir, `gateway-${new Date().toISOString().split('T')[0]}.log`);
     
-    // 配置 Logger
-    const rootLogger = new Logger({
+    // 设置全局 Logger 配置 - 所有模块的 Logger 都会继承此配置
+    configureLogger({
       level: options.verbose ? LogLevel.DEBUG : LogLevel.INFO,
       output: 'both',
       filePath: logFile,
