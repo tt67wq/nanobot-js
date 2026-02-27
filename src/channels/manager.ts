@@ -86,7 +86,12 @@ export class ChannelManager {
           const channel = this.channels.get(msg.channel);
           if (channel) {
             try {
-              await channel.send(msg);
+              // 处理进度更新消息
+              if (msg.isProgress && (channel as any).updateMessage && msg.messageIdToUpdate) {
+                await (channel as any).updateMessage(msg.chatId, msg.messageIdToUpdate, msg.content);
+              } else {
+                await channel.send(msg);
+              }
             } catch (e) {
               logger.error('Error sending to %s: %s', msg.channel, String(e));
             }

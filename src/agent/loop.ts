@@ -15,10 +15,31 @@ const __dirname = dirname(__filename);
 
 const logger = new Logger({ module: 'AGENT' });
 
+/**
+ * 进度事件类型
+ */
+export type ProgressEventType = 'tool_start' | 'tool_end' | 'thinking' | 'complete' | 'error';
+
+/**
+ * 进度事件数据
+ */
+export interface ProgressEvent {
+  type: ProgressEventType;
+  toolName?: string;
+  toolArgs?: unknown;
+  toolResult?: string;
+  content?: string;
+  iteration: number;
+  error?: string;
+}
+
 export interface AgentLoopOptions {
   model?: string;
   maxIterations?: number;
   verbose?: boolean;
+  thinking?: boolean;
+  /** 进度回调函数 - 在工具执行时通知外部 */
+  onProgress?: (event: ProgressEvent) => void;
 }
 
 export class AgentLoop {
@@ -30,6 +51,8 @@ export class AgentLoop {
   private maxIterations: number;
   private verbose: boolean = true;
   private currentSessionKey: string = "cli:direct";
+  private thinking: boolean = false;
+  private onProgress?: (event: ProgressEvent) => void;
   
   constructor(
     private provider: LLMProvider,
@@ -45,6 +68,8 @@ export class AgentLoop {
     this.model = options?.model ?? provider.getDefaultModel();
     this.maxIterations = options?.maxIterations ?? 20;
     this.verbose = options?.verbose ?? true;
+    this.thinking = options?.thinking ?? false;
+    this.onProgress = options?.onProgress;
     
     const builtinSkillsDir = process.env.NANOBOT_BUILTIN_SKILLS || join(__dirname, "../skills");
     logger.debug('Creating SkillsLoader...');
@@ -73,6 +98,7 @@ export class AgentLoop {
     
     logger.debug('Created successfully');
     logger.debug('Max iterations: %d', this.maxIterations);
+    logger.debug('Thinking enabled: %s', this.thinking);
   }
 
   private _registerDefaultTools(): void {
@@ -108,6 +134,19 @@ export class AgentLoop {
 
   private _registerMcpTools(): void {
     return;
+  }
+
+  /**
+   * 触发进度事件回调
+   */
+  private emitProgress(event: ProgressEvent): void {
+    if (this.onProgress) {
+      try {
+        this.onProgress(event);
+      } catch (e) {
+        logger.warn('Progress callback error: %s', String(e));
+      }
+    }
   }
 
   async processDirect(
@@ -166,13 +205,21 @@ export class AgentLoop {
     let iteration = 0;
     let finalContent: string | null = null;
     
+    // 发送开始思考事件
+    this.emitProgress({
+      type: 'thinking',
+      content: content.substring(0, 100),
+      iteration: 0
+    });
+    
     while (iteration < this.maxIterations) {
       iteration++;
       
       const response = await this.provider.chat({
         messages,
         tools: this.tools.get_definitions(),
-        model: this.model
+        model: this.model,
+        thinking: this.thinking
       });
       
       if (response.toolCalls && response.toolCalls.length > 0) {
@@ -192,10 +239,27 @@ export class AgentLoop {
         
         // Execute tools
         for (const toolCall of response.toolCalls) {
+          // 触发工具开始事件
+          this.emitProgress({
+            type: 'tool_start',
+            toolName: toolCall.name,
+            toolArgs: toolCall.arguments,
+            iteration
+          });
+          
           const result = await this.tools.execute(
             toolCall.name, 
             toolCall.arguments
           );
+          
+          // 触发工具结束事件
+          this.emitProgress({
+            type: 'tool_end',
+            toolName: toolCall.name,
+            toolArgs: toolCall.arguments,
+            toolResult: result.substring(0, 500), // 截断以避免过长
+            iteration
+          });
           
           // Add tool result
           messages.push({
@@ -210,6 +274,13 @@ export class AgentLoop {
         break;
       }
     }
+    
+    // 触发完成事件
+    this.emitProgress({
+      type: 'complete',
+      content: finalContent?.substring(0, 500),
+      iteration
+    });
     
     // Save session
     session.addMessage("user", content);

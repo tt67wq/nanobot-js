@@ -21,6 +21,11 @@ interface AnthropicTextBlock {
   text: string;
 }
 
+interface AnthropicThinkingBlock {
+  type: "thinking";
+  thinking: string;
+}
+
 interface AnthropicToolUseBlock {
   type: "tool_use";
   id: string;
@@ -43,7 +48,7 @@ interface AnthropicImageBlock {
   };
 }
 
-type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock | AnthropicToolResultBlock | AnthropicImageBlock;
+type AnthropicContentBlock = AnthropicTextBlock | AnthropicThinkingBlock | AnthropicToolUseBlock | AnthropicToolResultBlock | AnthropicImageBlock;
 
 /**
  * Anthropic message format
@@ -107,6 +112,7 @@ export class AnthropicProvider extends LLMProvider {
     const model = options.model || this.defaultModel;
     const maxTokens = options.maxTokens ?? 4096;
     const temperature = options.temperature ?? 0.7;
+    const thinking = options.thinking ?? false;
 
     // Convert messages to Anthropic format
     const anthropicMessages = this._convertMessages(options.messages);
@@ -123,9 +129,10 @@ export class AnthropicProvider extends LLMProvider {
         messages: anthropicMessages,
         tools: anthropicTools,
         temperature,
+        thinking,
       });
 
-      return this._parseResponse(response);
+      return this._parseResponse(response, thinking);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
@@ -146,6 +153,7 @@ export class AnthropicProvider extends LLMProvider {
     messages: AnthropicMessage[];
     tools?: AnthropicTool[];
     temperature: number;
+    thinking: boolean;
   }): Promise<AnthropicResponse> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -166,6 +174,11 @@ export class AnthropicProvider extends LLMProvider {
       messages: params.messages,
       temperature: params.temperature,
     };
+
+    // 添加 thinking 配置 (Claude 3.5 Sonnet+ 支持)
+    if (params.thinking) {
+      body.thinking = { type: "enabled" };
+    }
 
     if (params.tools && params.tools.length > 0) {
       body.tools = params.tools;
@@ -300,12 +313,16 @@ export class AnthropicProvider extends LLMProvider {
   /**
    * Parse Anthropic response into our standard format.
    */
-  private _parseResponse(response: AnthropicResponse): LLMResponse {
+  private _parseResponse(response: AnthropicResponse, includeThinking: boolean = false): LLMResponse {
     let content = "";
+    let thinkingContent = "";
     const toolCalls: ToolCallRequest[] = [];
 
     for (const block of response.content) {
-      if (block.type === "text") {
+      if (block.type === "thinking") {
+        thinkingContent = (block as AnthropicThinkingBlock).thinking;
+      }
+      else if (block.type === "text") {
         content = (block as AnthropicTextBlock).text;
       }
       else if (block.type === "tool_use") {
@@ -316,7 +333,11 @@ export class AnthropicProvider extends LLMProvider {
           arguments: toolBlock.input,
         });
       }
-      // Ignore other block types (like thinking)
+    }
+
+    // 如果启用 thinking，将 thinking 内容附加到回答前
+    if (includeThinking && thinkingContent) {
+      content = `[Thinking: ${thinkingContent}]\n\n${content}`;
     }
 
     const usage = {

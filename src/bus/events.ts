@@ -3,7 +3,7 @@
  * 
  * 对应 Python: nanobot/bus/events.py
  * 
- * 定义入站消息和出站消息的类型，用于消息总线系统
+ * 定义入站消息和出站消息的类型，用于消息队列系统
  */
 
 // ============================================
@@ -66,6 +66,10 @@ export interface OutboundMessage {
   media?: string[];
   /** 渠道特定的其他数据 (可选) */
   metadata?: Record<string, unknown>;
+  /** 是否为进度更新消息（只更新已有消息，不创建新消息） */
+  isProgress?: boolean;
+  /** 如果是进度更新，需要指定要更新的消息 ID */
+  messageIdToUpdate?: string;
 }
 
 // ============================================

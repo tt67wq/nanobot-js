@@ -25,6 +25,8 @@ export const AgentDefaultsSchema = z.object({
   max_tokens: z.number().int().default(8192),
   temperature: z.number().default(0.7),
   max_tool_iterations: z.number().int().default(20),
+  // 是否启用 thinking (扩展思考)
+  thinking: z.boolean().default(false),
 });
 
 export type AgentDefaults = z.infer<typeof AgentDefaultsSchema>;
@@ -132,6 +134,7 @@ export const LoggerConfigSchema = z.object({
 });
 
 export type LoggerConfig = z.infer<typeof LoggerConfigSchema>;
+
 // Context Cleanup 配置
 export const ContextCleanupConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -143,6 +146,7 @@ export const ContextCleanupConfigSchema = z.object({
 });
 
 export type ContextCleanupConfig = z.infer<typeof ContextCleanupConfigSchema>;
+
 export const ConfigSchema = z.object({
   agents: AgentsConfigSchema.default(() => AgentsConfigSchema.parse({})),
   channels: ChannelsConfigSchema.default(() => ChannelsConfigSchema.parse({})),
@@ -153,6 +157,7 @@ export const ConfigSchema = z.object({
   logger: LoggerConfigSchema.default(() => LoggerConfigSchema.parse({})),
   context_cleanup: ContextCleanupConfigSchema.default(() => ContextCleanupConfigSchema.parse({})),
 });
+
 export type ConfigType = z.infer<typeof ConfigSchema>;
 
 export class Config {

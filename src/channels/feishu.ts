@@ -264,6 +264,29 @@ export class FeishuChannel extends BaseChannel {
         elements: [{ tag: 'markdown', content: markdownToFeishu(msg.content) }],
       });
 
+      // 如果有 replyTo 消息 ID，使用回复 API
+      if (msg.replyTo) {
+        const response = await this.apiClient.im.message.reply({
+          path: {
+            message_id: msg.replyTo,
+          },
+          data: {
+            msg_type: 'interactive',
+            content: cardContent,
+          },
+        });
+
+        const respCode = (response as any).code;
+        
+        if (respCode === 0) {
+          this.log('info', '✓ Reply sent to %s', msg.replyTo);
+        } else {
+          this.log('error', 'Failed to reply: code=%s, msg=%s', respCode, (response as any).msg);
+        }
+        return;
+      }
+
+      // 默认创建新消息
       const response = await this.apiClient.im.message.create({
         params: {
           receive_id_type: 'chat_id',
@@ -285,6 +308,46 @@ export class FeishuChannel extends BaseChannel {
 
     } catch (e: any) {
       this.log('error', 'Error sending message: %s', e?.message || e);
+    }
+  }
+
+  /**
+   * 更新已有消息（使用 patch API）
+   * 用于显示工具执行进度
+   */
+  async updateMessage(chatId: string, messageId: string, content: string): Promise<void> {
+    if (!this.apiClient) {
+      this.log('error', 'API client not initialized');
+      return;
+    }
+
+    try {
+      const cardContent = JSON.stringify({
+        config: { wide_screen_mode: true },
+        elements: [{ tag: 'markdown', content: markdownToFeishu(content) }],
+      });
+
+      const response = await this.apiClient.im.message.patch({
+        path: {
+          message_id: messageId,
+        },
+        params: {
+          msg_type: 'interactive',
+        },
+        data: {
+          content: cardContent,
+        },
+      });
+
+      const respCode = (response as any).code;
+      
+      if (respCode === 0) {
+        this.log('debug', '✓ Message updated: %s', messageId);
+      } else {
+        this.log('error', 'Failed to update message: code=%s, msg=%s', respCode, (response as any).msg);
+      }
+    } catch (e: any) {
+      this.log('error', 'Error updating message: %s', e?.message || e);
     }
   }
 
@@ -351,7 +414,7 @@ export class FeishuChannel extends BaseChannel {
       this.log('debug', 'Image message forwarded to bus successfully');
 
     } catch (e: any) {
-      this.log('error', 'Error handling image message:', e);
+      this.log('error', 'Error handling image message:', e?.message || e);
     }
   }
 

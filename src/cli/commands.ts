@@ -9,7 +9,7 @@ import {
   getDataDir,
 } from "../config/loader";
 import { getWorkspacePath } from "../utils/helpers";
-import { AgentLoop } from "../agent/loop";
+import { AgentLoop, ProgressEvent } from "../agent/loop";
 import { MessageBus } from "../bus/queue";
 import { getSessionKey } from "../bus/events";
 import { ChannelManager } from "../channels/manager";
@@ -102,7 +102,7 @@ agentCmd
 
     const agent = new AgentLoop(provider, config.workspacePath, {
       model: config.agents.defaults.model,
-      maxIterations: config.agents.defaults.max_tool_iterations,
+      maxIterations: config.agents.defaults.max_tool_iterations, thinking: config.agents.defaults.thinking,
     });
 
     // Parse image paths
@@ -167,7 +167,7 @@ gatewayCmd
 
     const agent = new AgentLoop(provider, config.workspacePath, {
       model: config.agents.defaults.model,
-      maxIterations: config.agents.defaults.max_tool_iterations,
+      maxIterations: config.agents.defaults.max_tool_iterations, thinking: config.agents.defaults.thinking,
     });
 
     const cronStorePath = join(getDataDir(), "cron", "jobs.json");
@@ -236,8 +236,66 @@ gatewayCmd
             // 生成会话键
             const sessionKey = getSessionKey(inboundMsg);
 
+            // 记录开始时间
+            const startTime = Date.now();
+
+            // 发送初始 "正在思考" 消息
+            const initialMsg = {
+              channel: inboundMsg.channel,
+              chatId: inboundMsg.chatId,
+              content: "🤔 正在思考...",
+              replyTo: inboundMsg.metadata?.message_id as string | undefined,
+              metadata: inboundMsg.metadata,
+            };
+            await bus.publishOutbound(initialMsg);
+
+            // 进度回调函数
+            const progressHandler = (event: ProgressEvent): void => {
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              let content = "";
+              
+              switch (event.type) {
+                case 'thinking':
+                  content = `🤔 思考中... (${elapsed}s)`;
+                  break;
+                case 'tool_start':
+                  const args = typeof event.toolArgs === 'string' 
+                    ? event.toolArgs.substring(0, 200) 
+                    : JSON.stringify(event.toolArgs).substring(0, 200);
+                  content = `🔧 **执行工具: ${event.toolName}**\n\`\`\`\n${args}\n\`\`\`\n⏱️ ${elapsed}s`;
+                  break;
+                case 'tool_end':
+                  content = `✅ **${event.toolName}** 完成\n${event.toolResult?.substring(0, 300) || ''}\n⏱️ ${elapsed}s`;
+                  break;
+                case 'complete':
+                  content = `✨ **处理完成!** (${elapsed}s)`;
+                  break;
+                case 'error':
+                  content = `❌ **错误**: ${event.error || '未知错误'}`;
+                  break;
+              }
+              
+              if (content) {
+                bus.publishOutbound({
+                  channel: inboundMsg.channel,
+                  chatId: inboundMsg.chatId,
+                  content,
+                  replyTo: inboundMsg.metadata?.message_id as string | undefined,
+                  metadata: inboundMsg.metadata,
+                });
+              }
+            };
+
+            // 创建带进度回调的 Agent 实例
+            const progressAgent = new AgentLoop(provider, config.workspacePath, {
+              model: config.agents.defaults.model,
+              maxIterations: config.agents.defaults.max_tool_iterations,
+              thinking: config.agents.defaults.thinking,
+              onProgress: progressHandler,
+            });
+
             // 调用 AgentLoop 处理消息
-            const response = await agent.processDirect(
+            const response = await progressAgent.processDirect(
               inboundMsg.content,
               sessionKey,
               inboundMsg.media,

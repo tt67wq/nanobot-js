@@ -50,6 +50,7 @@ export interface Message {
   }>;
 }
 
+
 export interface ChatOptions {
   /** List of messages to send */
   messages: Message[];
@@ -61,6 +62,8 @@ export interface ChatOptions {
   maxTokens?: number;
   /** Sampling temperature */
   temperature?: number;
+  /** 是否启用 thinking (扩展思考) */
+  thinking?: boolean;
 }
 
 /**

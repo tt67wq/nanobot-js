@@ -116,6 +116,7 @@ export class OpenAIProvider extends LLMProvider {
     const model = options.model || this.defaultModel;
     const maxTokens = options.maxTokens ?? 4096;
     const temperature = options.temperature ?? 0.7;
+    const thinking = options.thinking ?? false;
 
     try {
       const response = await this._makeRequest({
@@ -124,9 +125,10 @@ export class OpenAIProvider extends LLMProvider {
         messages: options.messages,
         tools: options.tools,
         temperature,
+        thinking,
       });
 
-      return this._parseResponse(response);
+      return this._parseResponse(response, thinking);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -148,6 +150,7 @@ export class OpenAIProvider extends LLMProvider {
     messages: ChatOptions["messages"];
     tools?: ToolDefinition[];
     temperature: number;
+    thinking: boolean;
   }): Promise<OpenAIResponse> {
     const baseUrl = this.apiBase || OPENAI_API_BASE;
     const url = `${baseUrl}/chat/completions`;
@@ -175,7 +178,17 @@ export class OpenAIProvider extends LLMProvider {
       temperature: params.temperature,
     };
 
-    if (openaiTools && openaiTools.length > 0) {
+    // 添加 thinking 配置 (o1 系列模型支持)
+    if (params.thinking) {
+      // o1 模型不支持 temperature 和 tools
+      if (params.model.startsWith("o1")) {
+        delete body.temperature;
+        delete body.tools;
+        delete body.tool_choice;
+      }
+    }
+
+    if (openaiTools && openaiTools.length > 0 && !params.model.startsWith("o1")) {
       body.tools = openaiTools;
       body.tool_choice = "auto";
     }
@@ -239,7 +252,7 @@ export class OpenAIProvider extends LLMProvider {
   /**
    * Parse OpenAI response into our standard format.
    */
-  private _parseResponse(response: OpenAIResponse): LLMResponse {
+  private _parseResponse(response: OpenAIResponse, includeThinking: boolean = false): LLMResponse {
     const choice = response.choices[0];
     const message = choice.message;
 
@@ -269,15 +282,18 @@ export class OpenAIProvider extends LLMProvider {
       }
     }
 
-    const reasoningDetails = (
-      message as { reasoning_details?: Array<{ text: string }> }
-    ).reasoning_details;
-    if (reasoningDetails && reasoningDetails.length > 0) {
-      const thinkingContent = `[Thinking: ${reasoningDetails[0].text}]`;
-      if (content) {
-        content = thinkingContent + "\n\n" + content;
-      } else {
-        content = thinkingContent;
+    // 处理 thinking (o1 系列模型的 reasoning)
+    if (includeThinking) {
+      const reasoningDetails = (
+        message as { reasoning_details?: Array<{ text: string }> }
+      ).reasoning_details;
+      if (reasoningDetails && reasoningDetails.length > 0) {
+        const thinkingContent = `[Thinking: ${reasoningDetails[0].text}]`;
+        if (content) {
+          content = thinkingContent + "\n\n" + content;
+        } else {
+          content = thinkingContent;
+        }
       }
     }
 
