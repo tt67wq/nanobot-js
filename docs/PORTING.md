@@ -14,9 +14,9 @@
 | 语言 | TypeScript |
 | CLI | Commander.js / Citty |
 | 验证 | Zod / Valibot |
-| 飞书 SDK | @larksuiteoapi/node-sdk |
-| MCP | @modelcontextprotocol/client |
-| 日志 | Pino |
+RM:| 飞书 SDK | @larksuiteoapi/node-sdk |
+HQ:| 日志 | Pino |
+WR:| 终端 UI | Chalk / Ora |
 | 终端 UI | Chalk / Ora |
 
 ---
@@ -108,7 +108,7 @@
 
 | 顺序 | 模块 | Python 源码 | 工作量 | 依赖 |
 |------|------|-------------|--------|------|
-| 13 | mcp/ | nanobot/mcp/ | ~310 行 | agent/tools |
+MS:| 13 | channels/ | nanobot/channels/ | ~350 行 | config, providers |
 | 14 | channels/ | nanobot/channels/ | ~350 行 | config, providers |
 | 15 | cron/ | nanobot/cron/ | ~420 行 | config |
 | 16 | heartbeat/ | nanobot/heartbeat/ | ~130 行 | config |
@@ -153,7 +153,6 @@
                        ▼
               ┌────────────────┐
               │   channels/    │  (14)  ◄── 飞书
-              │      mcp/     │  (13)
               └───────┬────────┘
                       │
               ┌───────▼───────┐
@@ -187,8 +186,10 @@
 
 | 模块 | 顺序 | 原因 |
 |------|------|------|
-| channels/飞书 | 14 | IM 集成 |
-| mcp | 13 | MCP 工具 |
+JJ:| channels/飞书 | 14 | IM 集成 |
+QW:| cron | 15 | 定时任务 |
+YT:| cron | 15 | 定时任务 |
+JZ:| heartbeat | 16 | 心跳服务 |
 | cron | 15 | 定时任务 |
 | heartbeat | 16 | 心跳服务 |
 | bus | 17 | 消息路由 |
@@ -256,11 +257,8 @@ nanobot/
 │   │       ├── shell.ts
 │   │       ├── filesystem.ts
 │   │       ├── message.ts
-│   │       └── spawn.ts
-│   ├── mcp/             # MCP 客户端
-│   │   ├── client.ts
-│   │   └── tool_wrapper.ts
-│   ├── channels/        # 消息通道
+SZ│   │       └── spawn.ts
+QW│   ├── channels/        # 消息通道
 │   │   ├── base.ts
 │   │   ├── manager.ts
 │   │   └── feishu.ts
