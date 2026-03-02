@@ -112,7 +112,6 @@ export class AgentLoop {
     logger.debug('SkillsLoader passed to ContextBuilder');
     
     this._registerDefaultTools();
-    this._registerMcpTools();
     
     logger.debug('Created successfully');
     logger.debug('Max iterations: %d', this.maxIterations);
@@ -163,9 +162,6 @@ export class AgentLoop {
     this.tools.register(new ScreenshotTool());
   }
 
-  private _registerMcpTools(): void {
-    return;
-  }
 
   /**
    * 触发进度事件回调

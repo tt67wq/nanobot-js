@@ -1,11 +1,11 @@
-import type { MessageBus } from '../bus/queue';
-import type { OutboundMessage } from '../bus/events';
-import type { BaseChannel } from './base';
-import type { Config } from '../config/schema';
-import { FeishuChannel } from './feishu';
-import { Logger } from '../utils/logger';
+import type { MessageBus } from "../bus/queue";
+import type { OutboundMessage } from "../bus/events";
+import type { BaseChannel } from "./base";
+import type { Config } from "../config/schema";
+import { FeishuChannel } from "./feishu";
+import { Logger } from "../utils/logger";
 
-const logger = new Logger({ module: 'CHANNEL' });
+const logger = new Logger({ module: "CHANNEL" });
 
 export class ChannelManager {
   private channels: Map<string, BaseChannel> = new Map();
@@ -14,7 +14,7 @@ export class ChannelManager {
 
   constructor(
     private config: Config,
-    private bus: MessageBus
+    private bus: MessageBus,
   ) {
     this.initChannels();
   }
@@ -22,20 +22,25 @@ export class ChannelManager {
   private initChannels(): void {
     if (this.config.channels?.feishu?.enabled) {
       try {
-        this.channels.set('feishu', new FeishuChannel(
-          this.config.channels.feishu as Record<string, unknown>,
-          this.bus
-        ));
-        logger.info('Feishu channel enabled');
+        const feishuConfig = this.config.channels.feishu;
+        logger.info(
+          "Feishu channel creating, config: %s",
+          JSON.stringify(feishuConfig),
+        );
+        this.channels.set(
+          "feishu",
+          new FeishuChannel(feishuConfig as Record<string, unknown>, this.bus),
+        );
+        logger.info("Feishu channel enabled");
       } catch (e) {
-        logger.warn('Feishu channel not available: %s', String(e));
+        logger.warn("Feishu channel not available: %s", String(e));
       }
     }
   }
 
   async startAll(): Promise<void> {
     if (!this.channels.size) {
-      logger.warn('No channels enabled');
+      logger.warn("No channels enabled");
       return;
     }
 
@@ -44,7 +49,7 @@ export class ChannelManager {
 
     const tasks: Promise<void>[] = [];
     for (const [name, channel] of this.channels.entries()) {
-      logger.info('Starting %s channel...', name);
+      logger.info("Starting %s channel...", name);
       tasks.push(channel.start());
     }
 
@@ -52,7 +57,7 @@ export class ChannelManager {
   }
 
   async stopAll(): Promise<void> {
-    logger.info('Stopping all channels...');
+    logger.info("Stopping all channels...");
 
     this.shouldStop = true;
 
@@ -68,15 +73,15 @@ export class ChannelManager {
     for (const [name, channel] of this.channels.entries()) {
       try {
         await channel.stop();
-        logger.info('Stopped %s channel', name);
+        logger.info("Stopped %s channel", name);
       } catch (e) {
-        logger.error('Error stopping %s: %s', name, String(e));
+        logger.error("Error stopping %s: %s", name, String(e));
       }
     }
   }
 
   private async dispatchOutbound(): Promise<void> {
-    logger.info('Outbound dispatcher started');
+    logger.info("Outbound dispatcher started");
 
     while (!this.shouldStop) {
       try {
@@ -87,16 +92,24 @@ export class ChannelManager {
           if (channel) {
             try {
               // 处理进度更新消息
-              if (msg.isProgress && (channel as any).updateMessage && msg.messageIdToUpdate) {
-                await (channel as any).updateMessage(msg.chatId, msg.messageIdToUpdate, msg.content);
+              if (
+                msg.isProgress &&
+                (channel as any).updateMessage &&
+                msg.messageIdToUpdate
+              ) {
+                await (channel as any).updateMessage(
+                  msg.chatId,
+                  msg.messageIdToUpdate,
+                  msg.content,
+                );
               } else {
                 await channel.send(msg);
               }
             } catch (e) {
-              logger.error('Error sending to %s: %s', msg.channel, String(e));
+              logger.error("Error sending to %s: %s", msg.channel, String(e));
             }
           } else {
-            logger.warn('Unknown channel: %s', msg.channel);
+            logger.warn("Unknown channel: %s", msg.channel);
           }
         }
       } catch {
@@ -105,7 +118,9 @@ export class ChannelManager {
     }
   }
 
-  private async getNextOutbound(timeoutMs: number): Promise<OutboundMessage | null> {
+  private async getNextOutbound(
+    timeoutMs: number,
+  ): Promise<OutboundMessage | null> {
     const start = Date.now();
     while (!this.shouldStop) {
       if (this.bus.outboundSize > 0) {
@@ -115,7 +130,7 @@ export class ChannelManager {
       if (Date.now() - start > timeoutMs) {
         return null;
       }
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return null;
   }

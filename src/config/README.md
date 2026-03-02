@@ -41,11 +41,7 @@ Config
 ├── gateway
 │   ├── host
 │   └── port
-├── tools.web.search
-│   ├── api_key
-│   └── max_results
-└── mcp
-    ├── enabled
-    ├── servers[]
-    └── default_server
+SR:│       └── api_base
+VQ:├── gateway
+NW:│   ├── host
 ```

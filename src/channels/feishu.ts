@@ -1,24 +1,20 @@
 import { BaseChannel } from './base';
 import type { MessageBus } from '../bus/queue';
 import type { OutboundMessage } from '../bus/events';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, createReadStream } from 'fs';
-import { join, dirname } from 'path';
+import type { FeishuConfig, FeishuMessageEvent, FeishuMention } from './feishu/types';
+import { FeishuImageHandler } from './feishu/image';
+import { FeishuClient } from './feishu/client';
+import { extractTextFromCard, parseTextContent, processMentions, isGroupChat } from './feishu/parser';
 import { markdownToFeishu } from '../utils/markdownToFeishu';
-import { tmpdir } from 'os';
 
-interface FeishuConfig {
-  appId?: string;
-  appSecret?: string;
-  allowFrom?: string[];
-  verbose?: boolean;
-  [key: string]: unknown;
-}
-
+/**
+ * 飞书通道实现
+ */
 export class FeishuChannel extends BaseChannel {
   name = 'feishu';
   private verbose: boolean = true;
-  private wsClient: any = null;
-  private apiClient: any = null;
+  private client: FeishuClient | null = null;
+  private imageHandler: FeishuImageHandler | null = null;
 
   constructor(config: FeishuConfig, bus: MessageBus) {
     super(config, bus);
@@ -28,7 +24,6 @@ export class FeishuChannel extends BaseChannel {
   private log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void {
     if (!this.verbose && level === 'debug') return;
     
-    // Replace %s placeholders with args
     let formattedMsg = message;
     for (const arg of args) {
       formattedMsg = formattedMsg.replace('%s', typeof arg === 'string' ? arg : JSON.stringify(arg));
@@ -36,7 +31,6 @@ export class FeishuChannel extends BaseChannel {
     
     const msg = `[FEISHU:${level.toUpperCase()}] ${formattedMsg}`;
     
-    // Output to logger
     if (level === 'debug') this.logger.debug(msg);
     else if (level === 'info') this.logger.info(msg);
     else if (level === 'warn') this.logger.warn(msg);
@@ -44,11 +38,10 @@ export class FeishuChannel extends BaseChannel {
   }
 
   async start(): Promise<void> {
-    const appId = (this.config.appId as string) || (this.config.app_id as string);
-    const appSecret = (this.config.appSecret as string) || (this.config.app_secret as string);
+    const appId = this.config.appId || (this.config as any).app_id;
+    const appSecret = this.config.appSecret || (this.config as any).app_secret;
 
     this.log('info', '=== Feishu Channel Starting (WebSocket Mode) ===');
-    this.log('debug', 'Config keys:', Object.keys(this.config));
 
     if (!appId || !appSecret) {
       this.log('error', 'MISSING appId or appSecret!');
@@ -56,40 +49,16 @@ export class FeishuChannel extends BaseChannel {
       return;
     }
 
-    this.log('info', 'App ID:', appId.substring(0, 8) + '...');
+    this.log('info', 'App ID: %s', appId.substring(0, 8) + '...');
 
     try {
-      const lark: any = await import('@larksuiteoapi/node-sdk');
+      this.client = new FeishuClient(this.config);
+      await this.client.init();
       
-      this.log('debug', 'Lark SDK loaded, creating API client...');
-      
-      this.apiClient = new lark.Client({
-        appId,
-        appSecret,
-        logLevel: lark.LoggerLevel.WARN,
-      });
+      this.imageHandler = new FeishuImageHandler(this.client.apiClient);
 
-      this.log('debug', 'Creating WSClient...');
-      this.wsClient = new lark.WSClient({
-        appId,
-        appSecret,
-        loggerLevel: lark.LoggerLevel.WARN,
-      });
-
-      this.log('debug', 'Creating event dispatcher...');
-      const eventDispatcher = new lark.EventDispatcher({});
-
-      this.log('debug', 'Registering message handler...');
-      eventDispatcher.register({
-        'im.message.receive_v1': async (data: any) => {
-          await this.handleIncomingMessage(data);
-        }
-      });
-
-      this.log('info', 'Starting WebSocket connection...');
-      
-      this.wsClient.start({
-        eventDispatcher,
+      this.client.startListening((data) => {
+        this.handleIncomingMessage(data);
       });
       
       this.running = true;
@@ -102,11 +71,44 @@ export class FeishuChannel extends BaseChannel {
     }
   }
 
-  private async handleIncomingMessage(data: any): Promise<void> {
-    try {
-      this.log('debug', 'Raw event data:', JSON.stringify(data).substring(0, 500));
+  /**
+   * 检查消息中的 @ 提及是否是针对当前机器人的
+   * 只依赖 open_id 精确匹配
+   */
+  private checkBotMentioned(mentions: FeishuMention[]): boolean {
+    const botUserId = this.config.botUserId || (this.config as any).bot_user_id;
 
-      // The structure is: data.message, not data.event.message
+    // 调试日志
+    this.log('info', '>>> DEBUG: botUserId=%s', botUserId);
+
+    for (const mention of mentions) {
+      const mentionKey = mention?.key || '';
+      const mentionId = mention?.id || {};
+      const mentionOpenId = (mentionId as any).open_id || '';
+      const mentionName = mention?.name || '';
+      
+      this.log('info', '>>> Checking: key=%s, open_id=%s, name=%s', 
+        mentionKey, mentionOpenId, mentionName);
+
+      // 精确匹配 open_id
+      if (botUserId && mentionOpenId === botUserId) {
+        this.log('info', '>>> MATCHED: is @ bot (open_id)');
+        return true;
+      }
+
+      // 回退: 只有未配置 botUserId 时才匹配任何 @
+      if (!botUserId && mentionKey.startsWith('@_user_')) {
+        this.log('info', '>>> MATCHED: fallback (no botUserId configured)');
+        return true;
+      }
+    }
+
+    this.log('info', '>>> NOT matched - message is for another user');
+    return false;
+  }
+
+  private async handleIncomingMessage(data: FeishuMessageEvent): Promise<void> {
+    try {
       const message = data?.message;
       if (!message) {
         this.log('warn', 'No message in data, keys:', Object.keys(data));
@@ -121,7 +123,7 @@ export class FeishuChannel extends BaseChannel {
 
       const senderId = sender?.sender_id?.open_id || sender?.sender_id?.user_id;
       if (!senderId) {
-        this.log('warn', 'No sender ID found, sender:', JSON.stringify(sender));
+        this.log('warn', 'No sender ID found');
         return;
       }
 
@@ -132,33 +134,45 @@ export class FeishuChannel extends BaseChannel {
       }
 
       const messageType = message?.message_type;
+      const chatType = message?.chat_type;
+      const mentions = data?.event?.mentions || message?.mentions || [];
+
+      // 群聊时检查是否 @ 了机器人
+      if (isGroupChat(chatType)) {
+        if (mentions.length === 0) {
+          return;
+        }
+
+        this.log('info', '>>> Group message - mentions: %s', JSON.stringify(mentions));
+
+        const isMentioned = this.checkBotMentioned(mentions);
+
+        if (!isMentioned) {
+          this.log('info', '>>> Skipping: not @ this bot');
+          return;
+        }
+
+        this.log('info', '>>> Processing: group message @ this bot');
+      }
+      
       this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
 
-      // Handle image messages
       if (messageType === 'image') {
         await this.handleImageMessage(message, senderId, chatId, data);
         return;
       }
 
-      // Skip other non-text messages
+      if (messageType === 'post') {
+        await this.handlePostMessage(message, senderId, chatId, data);
+        return;
+      }
+
       if (messageType !== 'text') {
-        this.log('debug', 'Skipping non-text message type:', messageType);
         return;
       }
 
-      const contentJson = message?.content;
-      if (!contentJson) {
-        this.log('warn', 'No content in message');
-        return;
-      }
-
-      let content: string;
-      try {
-        const contentData = JSON.parse(contentJson);
-        content = contentData.text || '';
-      } catch {
-        content = contentJson;
-      }
+      let content = parseTextContent(message?.content);
+      content = processMentions(content, mentions);
 
       if (!content) {
         this.log('warn', 'Empty message content');
@@ -175,191 +189,19 @@ export class FeishuChannel extends BaseChannel {
         {
           message_id: message?.message_id,
           create_time: message?.create_time,
-          event_type: data?.event_type,
+          event_type: (data as any).event_type,
           msg_type: messageType,
         }
       );
-
-      this.log('debug', 'Message forwarded to bus successfully');
 
     } catch (e) {
       this.log('error', 'Error handling incoming message:', e);
     }
   }
 
-  private extractTextFromCard(contentData: Record<string, unknown>): string {
-    const texts: string[] = [];
+  private async handleImageMessage(message: any, senderId: string, chatId: string, data: any): Promise<void> {
+    if (!this.imageHandler) return;
 
-    const extractFromElement = (elem: unknown): void => {
-      if (typeof elem !== 'object' || elem === null) return;
-
-      const e = elem as Record<string, unknown>;
-      const tag = e.tag as string;
-
-      if (tag === 'text' || tag === 'plain_text') {
-        if (e.text) texts.push(e.text as string);
-      } else if (tag === 'markdown') {
-        if (e.content) texts.push(e.content as string);
-      } else if (tag === 'column_set' || tag === 'columns') {
-        const elements = e.elements as unknown[];
-        if (elements) {
-          for (const child of elements) {
-            extractFromElement(child);
-          }
-        }
-      } else if (tag === 'column') {
-        const elements = e.elements as unknown[];
-        if (elements) {
-          for (const child of elements) {
-            extractFromElement(child);
-          }
-        }
-      }
-    };
-
-    if (contentData.card) {
-      const card = contentData.card as Record<string, unknown>;
-      const elements = card.elements as unknown[];
-      if (elements) {
-        for (const elem of elements) {
-          extractFromElement(elem);
-        }
-      }
-    } else {
-      const rawElements = contentData.elements as unknown[];
-      if (rawElements) {
-        for (const elemOrRow of rawElements) {
-          if (Array.isArray(elemOrRow)) {
-            for (const elem of elemOrRow) {
-              extractFromElement(elem);
-            }
-          } else {
-            extractFromElement(elemOrRow);
-          }
-        }
-      }
-    }
-
-    if (contentData.title) {
-      texts.unshift(`[${contentData.title}]`);
-    }
-
-    return texts.join('\n');
-  }
-
-  async stop(): Promise<void> {
-    this.running = false;
-    this.log('info', 'Channel stopped');
-  }
-
-  async send(msg: OutboundMessage): Promise<void> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return;
-    }
-
-    try {
-      const cardContent = JSON.stringify({
-        config: { wide_screen_mode: true },
-        elements: [{ tag: 'markdown', content: markdownToFeishu(msg.content) }],
-      });
-
-      // 如果有 replyTo 消息 ID，使用回复 API
-      if (msg.replyTo) {
-        const response = await this.apiClient.im.message.reply({
-          path: {
-            message_id: msg.replyTo,
-          },
-          data: {
-            msg_type: 'interactive',
-            content: cardContent,
-          },
-        });
-
-        const respCode = (response as any).code;
-        
-        if (respCode === 0) {
-          this.log('info', '✓ Reply sent to %s', msg.replyTo);
-        } else {
-          this.log('error', 'Failed to reply: code=%s, msg=%s', respCode, (response as any).msg);
-        }
-        return;
-      }
-
-      // 默认创建新消息
-      const response = await this.apiClient.im.message.create({
-        params: {
-          receive_id_type: 'chat_id',
-        },
-        data: {
-          receive_id: msg.chatId,
-          msg_type: 'interactive',
-          content: cardContent,
-        },
-      });
-
-      const respCode = (response as any).code;
-      
-      if (respCode === 0) {
-        this.log('info', '✓ Message sent to %s', msg.chatId);
-      } else {
-        this.log('error', 'Failed to send: code=%s, msg=%s', respCode, (response as any).msg);
-      }
-
-    } catch (e: any) {
-      this.log('error', 'Error sending message: %s', e?.message || e);
-    }
-  }
-
-  /**
-   * 更新已有消息（使用 patch API）
-   * 用于显示工具执行进度
-   */
-  async updateMessage(chatId: string, messageId: string, content: string): Promise<void> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return;
-    }
-
-    try {
-      const cardContent = JSON.stringify({
-        config: { wide_screen_mode: true },
-        elements: [{ tag: 'markdown', content: markdownToFeishu(content) }],
-      });
-
-      const response = await this.apiClient.im.message.patch({
-        path: {
-          message_id: messageId,
-        },
-        params: {
-          msg_type: 'interactive',
-        },
-        data: {
-          content: cardContent,
-        },
-      });
-
-      const respCode = (response as any).code;
-      
-      if (respCode === 0) {
-        this.log('debug', '✓ Message updated: %s', messageId);
-      } else {
-        this.log('error', 'Failed to update message: code=%s, msg=%s', respCode, (response as any).msg);
-      }
-    } catch (e: any) {
-      this.log('error', 'Error updating message: %s', e?.message || e);
-    }
-  }
-
-  /**
-   * Handle incoming image message from Feishu
-   */
-  private async handleImageMessage(
-    message: any,
-    senderId: string,
-    chatId: string,
-    data: any
-  ): Promise<void> {
     try {
       const contentJson = message?.content;
       if (!contentJson) {
@@ -382,10 +224,7 @@ export class FeishuChannel extends BaseChannel {
       }
 
       const messageId = message?.message_id;
-      this.log('info', 'Downloading image: %s, message_id: %s', imageKey, messageId);
-
-      // Download image from Feishu - use messageResource API for message images
-      const imagePath = await this.downloadImage(imageKey, messageId);
+      const imagePath = await this.imageHandler.downloadImage(imageKey, messageId);
 
       if (!imagePath) {
         this.log('error', 'Failed to download image');
@@ -393,15 +232,12 @@ export class FeishuChannel extends BaseChannel {
       }
 
       this.log('info', 'Image downloaded to: %s', imagePath);
-
-      // Use local file path directly - ContextBuilder will convert to base64
-      // Note: Feishu URLs require authentication and cannot be accessed by external LLMs
-      this.log('info', 'Using local path for vision: %s', imagePath);
+      
       await this.handleMessage(
         senderId,
         chatId,
-        '[图片消息]',  // Brief text prompt
-        [imagePath],   // Media: local image file path
+        '[图片消息]',
+        [imagePath],
         {
           message_id: message?.message_id,
           create_time: message?.create_time,
@@ -411,152 +247,189 @@ export class FeishuChannel extends BaseChannel {
         }
       );
 
-      this.log('debug', 'Image message forwarded to bus successfully');
-
     } catch (e: any) {
       this.log('error', 'Error handling image message:', e?.message || e);
     }
   }
 
-  /**
-   * Download image from Feishu API and save to temp directory
-   * For message images, use messageResource API with message_id
-   */
-  private async downloadImage(imageKey: string, messageId?: string): Promise<string | null> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return null;
-    }
+  private async handlePostMessage(message: any, senderId: string, chatId: string, data: any): Promise<void> {
+    if (!this.imageHandler) return;
+
+    const mediaFiles: string[] = [];
+    const textParts: string[] = [];
 
     try {
-      // Create temp directory if not exists
-      const tempDir = join(tmpdir(), 'nanobot_feishu_images');
-      if (!existsSync(tempDir)) {
-        mkdirSync(tempDir, { recursive: true });
+      const contentJson = message?.content;
+      if (!contentJson) {
+        this.log('warn', 'No content in post message');
+        return;
       }
 
-      let response: any;
-
-      // Use messageResource API if we have message_id (for message images)
-      if (messageId) {
-        this.log('debug', 'Using im.messageResource.get API with message_id: %s', messageId);
-        response = await this.apiClient.im.messageResource.get({
-          path: {
-            message_id: messageId,
-            file_key: imageKey,
-          },
-          params: {
-            type: 'image',
-          },
-        });
-      } else {
-        // Fallback to image API for uploaded images
-        this.log('debug', 'Using im.image.get API with image_key: %s', imageKey);
-        response = await this.apiClient.im.image.get({
-          path: {
-            image_key: imageKey,
-          },
-        });
+      let contentData: Record<string, unknown>;
+      try {
+        contentData = JSON.parse(contentJson);
+      } catch {
+        this.log('warn', 'Failed to parse post message content');
+        return;
       }
 
-      // Check for API error response
-      this.log('debug', 'Response keys: %s', Object.keys(response));
-      
-      // If response has code field, check if it's an error
-      if (response.code !== undefined && response.code !== 0) {
-        this.log('error', 'Feishu API error: code=%s, msg=%s', response.code, response.msg);
-        return null;
+      let elements: unknown[] | undefined = undefined;
+      const body = contentData?.body as Record<string, unknown> | undefined;
+      if (body?.elements) {
+        elements = body.elements as unknown[];
       }
 
-      // Determine file extension from content type
-      let ext = 'png';
-      if (response.headers && response.headers['content-type']) {
-        const contentType = response.headers['content-type'];
-        if (contentType.includes('jpeg') || contentType.includes('jpg')) {
-          ext = 'jpg';
-        } else if (contentType.includes('gif')) {
-          ext = 'gif';
-        } else if (contentType.includes('webp')) {
-          ext = 'webp';
+      if (!elements && contentData?.content) {
+        const contentField = contentData.content;
+        if (typeof contentField === 'object' && contentField !== null) {
+          const contentObj = contentField as Record<string, unknown>;
+          if (Array.isArray(contentObj)) {
+            for (const row of contentObj) {
+              if (!Array.isArray(row)) continue;
+              for (const el of row) {
+                if (!el || typeof el !== 'object') continue;
+                const element = el as Record<string, unknown>;
+                const tag = element.tag as string;
+
+                if (tag === 'img') {
+                  const imageKey = element.image_key as string;
+                  if (imageKey) {
+                    const imagePath = await this.imageHandler.downloadImage(imageKey, message?.message_id);
+                    if (imagePath) mediaFiles.push(imagePath);
+                  }
+                } else if (tag === 'text' || tag === 'plain_text') {
+                  const text = element.text as string || element.content as string;
+                  if (text) textParts.push(text);
+                } else if (tag === 'markdown') {
+                  const text = element.text as string || element.content as string;
+                  if (text) textParts.push(text);
+                } else if (tag === 'a') {
+                  const text = element.text as string;
+                  const href = element.href as string;
+                  if (text) textParts.push(`${text} (${href})`);
+                } else if (tag === 'at') {
+                  const userName = element.user_name as string;
+                  if (userName) textParts.push(`@${userName}`);
+                }
+              }
+            }
+          }
         }
       }
 
-      // Save to temp file using SDK's writeFile method
-      const imagePath = join(tempDir, `feishu_${imageKey}_${Date.now()}.${ext}`);
-      
-      // Handle different response formats
-      if (response.data && Buffer.isBuffer(response.data)) {
-        // Data is in response.data as Buffer
-        writeFileSync(imagePath, response.data);
-      } else if (typeof response.writeFile === 'function') {
-        // Use SDK's writeFile method
-        await response.writeFile(imagePath);
-      } else if (typeof response.getReadableStream === 'function') {
-        // Use readable stream
-        const stream = response.getReadableStream();
-        const chunks: Buffer[] = [];
-        for await (const chunk of stream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        writeFileSync(imagePath, Buffer.concat(chunks));
-      } else {
-        this.log('error', 'Unexpected image response format, keys: %s', Object.keys(response));
-        return null;
+      if (!elements && contentData?.elements) {
+        elements = contentData.elements as unknown[];
       }
 
-      return imagePath;
+      if (contentData?.title) {
+        textParts.unshift(`[${contentData.title}]`);
+      }
+
+      if (elements && Array.isArray(elements)) {
+        for (const element of elements) {
+          if (!element || typeof element !== 'object') continue;
+          const el = element as Record<string, unknown>;
+          const tag = el.tag as string;
+
+          if (tag === 'img') {
+            const imageKey = el?.image_key as string;
+            if (imageKey) {
+              const imagePath = await this.imageHandler.downloadImage(imageKey, message?.message_id);
+              if (imagePath) mediaFiles.push(imagePath);
+            }
+          } else if (tag === 'text' || tag === 'plain_text') {
+            const text = el?.text as string || el?.content as string;
+            if (text) textParts.push(text);
+          } else if (tag === 'markdown') {
+            const text = el?.text as string || el?.content as string;
+            if (text) textParts.push(text);
+          }
+        }
+      }
+
+      const content = textParts.join('\n') || '[富文本消息]';
+
+      if (!content && mediaFiles.length === 0) {
+        this.log('warn', 'Empty post message');
+        return;
+      }
+
+      await this.handleMessage(
+        senderId,
+        chatId,
+        content,
+        mediaFiles,
+        {
+          message_id: message?.message_id,
+          create_time: message?.create_time,
+          event_type: data?.event_type,
+          msg_type: 'post',
+        }
+      );
 
     } catch (e: any) {
-      this.log('error', 'Failed to download image: %s', e?.message || e);
-      return null;
+      this.log('error', 'Error handling post message:', e?.message || e);
     }
   }
 
-  /**
-   * Upload image to Feishu and return accessible URL for vision models
-   * DashScope doesn't support base64, so we upload to Feishu and use their URL
-   */
-  private async uploadImageForVision(imagePath: string): Promise<string | null> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return null;
+  async stop(): Promise<void> {
+    this.running = false;
+    this.log('info', 'Channel stopped');
+  }
+
+  async send(msg: OutboundMessage): Promise<void> {
+    if (!this.client) {
+      this.log('error', 'Client not initialized');
+      return;
     }
 
     try {
-      this.log('debug', 'Uploading image to Feishu for vision: %s', imagePath);
+      const content = markdownToFeishu(msg.content);
 
-      // Upload to Feishu - SDK expects a Readable stream, not Buffer
-      const response = await this.apiClient.im.image.create({
-        data: {
-          image_type: 'message',
-          image: createReadStream(imagePath) as any,
-        },
-      }) as any;
+      if (msg.replyTo) {
+        const response = await this.client.replyMessage(msg.replyTo, content);
+        const respCode = (response as any).code;
+        
+        if (respCode === 0) {
+          this.log('info', '✓ Reply sent to %s', msg.replyTo);
+        } else {
+          this.log('error', 'Failed to reply: code=%s, msg=%s', respCode, (response as any).msg);
+        }
+        return;
+      }
 
-      // Check for API error
-      this.log('debug', 'Upload response: %s', JSON.stringify(response));
+      const response = await this.client.sendMessage(msg.chatId, content);
+      const respCode = (response as any).code;
       
-      if (response.code !== undefined && response.code !== 0) {
-        this.log('error', 'Failed to upload image to Feishu: code=%s, msg=%s', response.code, response.msg);
-        return null;
+      if (respCode === 0) {
+        this.log('info', '✓ Message sent to %s', msg.chatId);
+      } else {
+        this.log('error', 'Failed to send: code=%s, msg=%s', respCode, (response as any).msg);
       }
-
-      // Get image_key from response - SDK may return directly or wrapped in data
-      const imageKey = response.data?.image_key || response.image_key;
-      if (!imageKey) {
-        this.log('error', 'No image_key returned from Feishu upload, response: %s', JSON.stringify(response));
-        return null;
-      }
-
-      // Build Feishu image URL
-      const imageUrl = `https://open.feishu.cn/open-apis/im/v1/images/${imageKey}`;
-      this.log('debug', 'Image uploaded, URL: %s', imageUrl);
-
-      return imageUrl;
 
     } catch (e: any) {
-      this.log('error', 'Failed to upload image for vision: %s', e?.message || e);
-      return null;
+      this.log('error', 'Error sending message: %s', e?.message || e);
+    }
+  }
+
+  async updateMessage(chatId: string, messageId: string, content: string): Promise<void> {
+    if (!this.client) {
+      this.log('error', 'Client not initialized');
+      return;
+    }
+
+    try {
+      const cardContent = markdownToFeishu(content);
+      const response = await this.client.updateMessage(messageId, cardContent);
+      const respCode = (response as any).code;
+      
+      if (respCode === 0) {
+        this.log('debug', '✓ Message updated: %s', messageId);
+      } else {
+        this.log('error', 'Failed to update message: code=%s, msg=%s', respCode, (response as any).msg);
+      }
+    } catch (e: any) {
+      this.log('error', 'Error updating message: %s', e?.message || e);
     }
   }
 }

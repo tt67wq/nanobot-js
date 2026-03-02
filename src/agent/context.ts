@@ -5,12 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { IMemoryStore, ISkillsLoader, BOOTSTRAP_FILES } from "./types.js";
-import type { Message } from "../providers/base.js";
-
-interface MessageContent {
-  type: string;
-  [key: string]: unknown;
-}
+import type { Message, ContentPart } from "../providers/base.js";
 
 interface MediaContentItem {
   type: string;
@@ -256,12 +251,12 @@ When remembering something important, write to ${memoryPath}`;
   /**
    * Build user message content with optional base64-encoded images.
    */
-  _buildUserContent(text: string, media?: string[]): string | MessageContent[] {
+  _buildUserContent(text: string, media?: string[]): string | ContentPart[] {
     if (!media || media.length === 0) {
       return text;
     }
 
-    const images: MessageContent[] = [];
+    const images: ContentPart[] = [];
     for (const path of media) {
       try {
         const mimeType = this._getMimeType(path);

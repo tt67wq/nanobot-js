@@ -59,10 +59,9 @@
 | 🛠️ **内置工具** | Shell 命令、网页搜索、文件系统操作、进程管理、截图等 |
 | 📱 **多通道支持** | 支持飞书 (Feishu) 集成 |
 | 🖼️ **图片理解** | 支持 Vision 模型理解图片内容 (Claude/GPT) |
-| ⏰ **定时任务** | 内置 Cron 定时任务支持 |
-|| ⏰ **定时任务** | 内置 Cron 定时任务支持 |
-|| 💓 **心跳服务** | 定时主动唤醒执行任务 |
-|| 🔌 **MCP 支持** | 连接外部 MCP 服务器 (MiniMax 等) |
+SW:| ⏰ **定时任务** | 内置 Cron 定时任务支持 |
+KZ:| 💓 **心跳服务** | 定时主动唤醒执行任务 |
+JR:
 
 ## 🏗️ 架构
 
@@ -336,39 +335,6 @@ bun run src/cli/commands.ts gateway
 | `message` | 发送消息到通道 |
 || `screenshot` | 屏幕截图 |
 
-## 🔌 MCP 支持
-
-支持连接外部 MCP (Model Context Protocol) 服务器，扩展工具能力：
-
-### 配置示例
-
-```json
-{
-  "mcp": {
-    "enabled": true,
-    "servers": [
-      {
-        "name": "MiniMax",
-        "transport": "stdio",
-        "command": "uvx",
-        "args": ["minimax-coding-plan-mcp", "-y"],
-        "env": {
-          "MINIMAX_API_KEY": "your-api-key"
-        }
-      }
-    ]
-  }
-}
-```
-
-### 支持的 MCP 服务器
-
-- **MiniMax Coding Plan**: 代码辅助工具
-### 支持的 MCP 服务器
-
-- **MiniMax Coding Plan**: 代码辅助工具
-- 可连接任何标准 MCP 服务器
-
 ## 📁 项目结构
 
 ```
@@ -394,7 +360,6 @@ nanobot/
 │   ├── session/        # 💬 会话管理
 │   ├── config/         # ⚙️ 配置加载
 │   ├── cli/            # 🖥️ 命令行
-│   ├── mcp/            # 🔌 MCP 客户端
 │   └── skills/         # 🎯 技能包
 ├── bin/                 # 编译后的二进制
 ├── Makefile            # 构建脚本

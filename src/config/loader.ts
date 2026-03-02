@@ -47,7 +47,6 @@ export function saveConfig(config: Config, configPath?: string): void {
     providers: config.providers,
     gateway: config.gateway,
     tools: config.tools,
-    mcp: config.mcp,
   });
   
   const data = convertKeys(configData, false);

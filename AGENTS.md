@@ -23,7 +23,6 @@ nanobot/
 │   ├── config/         # 配置加载 (Zod)
 │   ├── heartbeat/      # 心跳服务
 │   ├── cli/            # 命令行入口
-│   ├── mcp/            # MCP 客户端 (支持 MiniMax 等)
 │   └── skills/         # 技能包
 ├── tests/              # 测试
 ├── bin/                # 编译产物
@@ -54,7 +53,6 @@ nanobot/
 | `AnthropicProvider` | class | `src/providers/anthropic.ts` | Claude 集成，Vision |
 | `OpenAIProvider` | class | `src/providers/openai.ts` | GPT/通义集成，Vision |
 || `FeishuChannel` | class | `src/channels/feishu.ts` | 飞书消息，图片下载 |
-| `MCPClientManager` | class | `src/mcp/manager.ts` | MCP 客户端管理 |
 
 ## CONVENTIONS
 
@@ -91,35 +89,6 @@ nanobot/
 
 支持的模型: Claude (所有 vision 模型), GPT-4o, 通义千问等
 
-## MCP (Model Context Protocol)
-
-支持连接外部 MCP 服务器，扩展工具能力：
-- **直接实现 MCP 协议** (JSON-RPC over stdio)
-- **支持多服务器**: 可配置多个 MCP 服务器
-- **工具调用**: `tools/list`, `tools/call`
-- **资源访问**: `resources/list`, `resources/read`
-- **环境变量**: 自动恢复被配置转换的 key (camelCase → SNAKE_CASE)
-
-### 配置示例
-
-```json
-{
-  "mcp": {
-    "enabled": true,
-    "servers": [
-      {
-        "name": "MiniMax",
-        "transport": "stdio",
-        "command": "uvx",
-        "args": ["minimax-coding-plan-mcp", "-y"],
-        "env": {
-          "MINIMAX_API_KEY": "your-api-key"
-        }
-      }
-    ]
-  }
-}
-```
 
 ## COMMANDS
 
