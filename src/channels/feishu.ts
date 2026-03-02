@@ -133,20 +133,39 @@ export class FeishuChannel extends BaseChannel {
           return;
         }
 
-        const botId = data?.bot_id || data?.event?.bot_id;
+        // 调试：打印接收到的消息详情
+        this.log('debug', 'Group message received, mentions: %s', JSON.stringify(mentions));
+
         const currentAppId = this.config.appId || this.config.app_id;
-        const eventAppId = data?.header?.app_id || data?.event?.header?.app_id;
 
-       // 检查 @ 的是否是当前机器人
-      // bot_id 是消息中被 @ 的机器人 ID，但我们需要验证这是否是当前机器人
-      // 如果 eventAppId 不存在（兼容旧版 API），则不跳过
-      const isTargetApp = !eventAppId || eventAppId === currentAppId;
+        // 检查 mentions 数组中是否包含当前机器人
+        // mentions 结构: [{ key: "@_user_xxx", id: { user_id }, name: "用户名" }]
+        // 飞书在文本中用 @_user_xxx 表示 @ 某个用户
+        let isMentioned = false;
+        for (const mention of mentions) {
+          // 检查 key 格式：@_user_xxx
+          const mentionKey = mention?.key || '';
+          if (mentionKey.startsWith('@_user_')) {
+            // 只要消息中有 @_user_ 格式的内容，就处理（简化判断）
+            isMentioned = true;
+            this.log('debug', 'Detected mention with key: %s', mentionKey);
+            break;
+          }
 
-      if (!isTargetApp) {
-        return;
-      }
+          // 备用：检查 id.user_id 是否匹配 app_id
+          const mentionUserId = mention?.id?.user_id;
+          if (mentionUserId && mentionUserId === currentAppId) {
+            isMentioned = true;
+            break;
+          }
+        }
 
-      this.log('info', 'Group message @ bot, processing');
+        if (!isMentioned) {
+          this.log('debug', 'Group message but not @ this bot, skipping');
+          return;
+        }
+
+        this.log('info', 'Group message @ this bot, processing');
       }
       // 私聊 (p2p) 不需要检查
       
