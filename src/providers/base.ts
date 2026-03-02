@@ -32,9 +32,10 @@ export type ContentPart =
 
 export interface Message {
   /** Role of the message sender */
+  /** Content of the message - string or content parts with images */
+  content: string | ContentPart[];
+  /** Role of the message sender */
   role: "system" | "user" | "assistant" | "tool";
-  /** Content of the message */
-  content: any;
   /** Optional tool call ID (for tool messages) */
   toolCallId?: string;
   /** Optional tool name (for tool messages) */
