@@ -129,6 +129,20 @@ export class FeishuChannel extends BaseChannel {
       }
 
       const messageType = message?.message_type;
+      const chatType = message?.chat_type;
+      const mentions = data?.event?.mentions || message?.mentions || [];
+      
+      // 群聊时检查是否 @ 了任何人（简化处理）
+      if (chatType === 'group' || chatType === 'topic_group') {
+        if (mentions.length === 0) {
+          this.log('debug', 'Group message without @, skipping');
+          return;
+        }
+        this.log('info', 'Group message with mentions, processing');
+      }
+      // 私聊 (p2p) 不需要检查
+      
+      this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
       this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
 
       // Handle image messages
