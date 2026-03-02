@@ -177,6 +177,19 @@ export class FeishuChannel extends BaseChannel {
         content = contentJson;
       }
 
+      // 使用 mentions 数组替换 @_user_X 占位符
+      // 飞书 text 字段中的 @_user_X 是占位符，mentions 数组包含实际被 @ 的用户信息
+      // mentions 结构: [{ user_id, key: "@_user_X", name: "用户名" }]
+      for (const mention of mentions) {
+        if (mention?.key && mention?.name) {
+          // 替换 @_user_X 为实际用户名
+          content = content.replace(new RegExp(mention.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), mention.name);
+        }
+      }
+
+      // 清理可能残留的 @_user_X 格式占位符
+      content = content.replace(/@_user_\d+\s*/g, '').trim();
+
       if (!content) {
         this.log('warn', 'Empty message content');
         return;
