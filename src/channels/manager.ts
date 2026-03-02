@@ -22,9 +22,11 @@ export class ChannelManager {
   private initChannels(): void {
     if (this.config.channels?.feishu?.enabled) {
       try {
-        logger.info('Feishu channel creating, config:', JSON.stringify(this.config.channels?.feishu));
+        const feishuConfig = this.config.channels.feishu;
+        logger.info('Feishu channel creating, config: %s', JSON.stringify(feishuConfig));
+        logger.info('Feishu config keys: %s', Object.keys(feishuConfig));
         this.channels.set('feishu', new FeishuChannel(
-          this.config.channels.feishu as Record<string, unknown>,
+          feishuConfig as Record<string, unknown>,
           this.bus
         ));
         logger.info('Feishu channel enabled');

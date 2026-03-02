@@ -42,11 +42,10 @@ export class FeishuChannel extends BaseChannel {
   }
 
   async start(): Promise<void> {
-    const appId = (this.config.appId as string) || (this.config.app_id as string);
-    const appSecret = (this.config.appSecret as string) || (this.config.app_secret as string);
+    const appId = (this.config.app_id as string) || (this.config.appId as string);
+    const appSecret = (this.config.app_secret as string) || (this.config.appSecret as string);
 
     this.log('info', '=== Feishu Channel Starting (WebSocket Mode) ===');
-    this.log('debug', 'Config keys:', Object.keys(this.config));
 
     if (!appId || !appSecret) {
       this.log('error', 'MISSING appId or appSecret!');
@@ -54,30 +53,25 @@ export class FeishuChannel extends BaseChannel {
       return;
     }
 
-    this.log('info', 'App ID:', appId.substring(0, 8) + '...');
+    this.log('info', 'App ID: %s', appId.substring(0, 8) + '...');
 
     try {
       const lark: any = await import('@larksuiteoapi/node-sdk');
-      
-      this.log('debug', 'Lark SDK loaded, creating API client...');
-      
+     
       this.apiClient = new lark.Client({
         appId,
         appSecret,
         logLevel: lark.LoggerLevel.WARN,
       });
 
-      this.log('debug', 'Creating WSClient...');
       this.wsClient = new lark.WSClient({
         appId,
         appSecret,
         loggerLevel: lark.LoggerLevel.WARN,
       });
 
-      this.log('debug', 'Creating event dispatcher...');
       const eventDispatcher = new lark.EventDispatcher({});
 
-      this.log('debug', 'Registering message handler...');
       eventDispatcher.register({
         'im.message.receive_v1': async (data: any) => {
           await this.handleIncomingMessage(data);
@@ -102,10 +96,6 @@ export class FeishuChannel extends BaseChannel {
 
   private async handleIncomingMessage(data: any): Promise<void> {
     try {
-      // ===== 步骤 1: 添加最开始的调试日志 =====
-      this.log('debug', '=== handleIncomingMessage called ===');
-      this.log('debug', 'data keys: %s', Object.keys(data));
-      this.log('debug', 'Raw event data:', JSON.stringify(data).substring(0, 500));
 
       const message = data?.message;
       if (!message) {
@@ -133,42 +123,26 @@ export class FeishuChannel extends BaseChannel {
       const messageType = message?.message_type;
       const chatType = message?.chat_type;
       const mentions = data?.event?.mentions || message?.mentions || [];
-      
-      // ===== 步骤 2: 调试 chatType 值 =====
-      this.log('debug', 'chatType raw value: %s', chatType);
-      this.log('debug', "chatType === 'group': %s", chatType === 'group');
-      this.log('debug', "chatType === 'topic_group': %s", chatType === 'topic_group');
-      // ===== 调试结束 =====
-      
+
       // 群聊时检查是否 @ 了机器人
       // 放宽判断：包含 'group' 的都视为群聊
       const isGroupChat = chatType?.includes('group');
-      this.log('debug', 'isGroupChat: %s', isGroupChat);
-      
+
       if (isGroupChat) {
         if (mentions.length === 0) {
-          this.log('debug', 'Group message without @, skipping');
           return;
         }
 
-        // ===== 调试日志：诊断 bot_id 和 mentions =====
         const botId = data?.bot_id || data?.event?.bot_id;
         const currentAppId = this.config.appId || this.config.app_id;
         const eventAppId = data?.header?.app_id || data?.event?.header?.app_id;
-        this.log('debug', '=== DEBUG: Group @ check ===');
-        this.log('debug', 'bot_id from event: %s', botId);
-        this.log('debug', 'current appId: %s', currentAppId);
-        this.log('debug', 'event app_id: %s', eventAppId);
-        this.log('debug', 'mentions: %s', JSON.stringify(mentions));
-        // ===== 调试结束 =====
 
-      // 修复：使用 event 中的 app_id 判断消息是否发给当前机器人
+       // 检查 @ 的是否是当前机器人
       // bot_id 是消息中被 @ 的机器人 ID，但我们需要验证这是否是当前机器人
       // 如果 eventAppId 不存在（兼容旧版 API），则不跳过
       const isTargetApp = !eventAppId || eventAppId === currentAppId;
 
       if (!isTargetApp) {
-        this.log('debug', 'Group message @ other bot, skipping (app_id mismatch)');
         return;
       }
 
@@ -193,7 +167,6 @@ export class FeishuChannel extends BaseChannel {
 
       // Skip other non-text messages
       if (messageType !== 'text') {
-        this.log('debug', 'Skipping non-text message type:', messageType);
         return;
       }
 
@@ -244,7 +217,6 @@ export class FeishuChannel extends BaseChannel {
         }
       );
 
-      this.log('debug', 'Message forwarded to bus successfully');
 
     } catch (e) {
       this.log('error', 'Error handling incoming message:', e);
