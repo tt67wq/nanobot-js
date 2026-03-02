@@ -102,6 +102,9 @@ export class FeishuChannel extends BaseChannel {
 
   private async handleIncomingMessage(data: any): Promise<void> {
     try {
+      // ===== 步骤 1: 添加最开始的调试日志 =====
+      this.log('debug', '=== handleIncomingMessage called ===');
+      this.log('debug', 'data keys: %s', Object.keys(data));
       this.log('debug', 'Raw event data:', JSON.stringify(data).substring(0, 500));
 
       const message = data?.message;
@@ -127,18 +130,49 @@ export class FeishuChannel extends BaseChannel {
         this.log('warn', 'No chat ID found');
         return;
       }
-
       const messageType = message?.message_type;
       const chatType = message?.chat_type;
       const mentions = data?.event?.mentions || message?.mentions || [];
       
-      // 群聊时检查是否 @ 了任何人（简化处理）
-      if (chatType === 'group' || chatType === 'topic_group') {
+      // ===== 步骤 2: 调试 chatType 值 =====
+      this.log('debug', 'chatType raw value: %s', chatType);
+      this.log('debug', "chatType === 'group': %s", chatType === 'group');
+      this.log('debug', "chatType === 'topic_group': %s", chatType === 'topic_group');
+      // ===== 调试结束 =====
+      
+      // 群聊时检查是否 @ 了机器人
+      // 放宽判断：包含 'group' 的都视为群聊
+      const isGroupChat = chatType?.includes('group');
+      this.log('debug', 'isGroupChat: %s', isGroupChat);
+      
+      if (isGroupChat) {
         if (mentions.length === 0) {
           this.log('debug', 'Group message without @, skipping');
           return;
         }
-        this.log('info', 'Group message with mentions, processing');
+
+        // ===== 调试日志：诊断 bot_id 和 mentions =====
+        const botId = data?.bot_id || data?.event?.bot_id;
+        const currentAppId = this.config.appId || this.config.app_id;
+        const eventAppId = data?.header?.app_id || data?.event?.header?.app_id;
+        this.log('debug', '=== DEBUG: Group @ check ===');
+        this.log('debug', 'bot_id from event: %s', botId);
+        this.log('debug', 'current appId: %s', currentAppId);
+        this.log('debug', 'event app_id: %s', eventAppId);
+        this.log('debug', 'mentions: %s', JSON.stringify(mentions));
+        // ===== 调试结束 =====
+
+      // 修复：使用 event 中的 app_id 判断消息是否发给当前机器人
+      // bot_id 是消息中被 @ 的机器人 ID，但我们需要验证这是否是当前机器人
+      // 如果 eventAppId 不存在（兼容旧版 API），则不跳过
+      const isTargetApp = !eventAppId || eventAppId === currentAppId;
+
+      if (!isTargetApp) {
+        this.log('debug', 'Group message @ other bot, skipping (app_id mismatch)');
+        return;
+      }
+
+      this.log('info', 'Group message @ bot, processing');
       }
       // 私聊 (p2p) 不需要检查
       
