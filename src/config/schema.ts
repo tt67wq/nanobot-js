@@ -8,6 +8,7 @@ export const FeishuConfigSchema = z.object({
   enabled: z.boolean().default(false),
   app_id: z.string().default(""),
   app_secret: z.string().default(""),
+  bot_user_id: z.string().default(""),
   allow_from: z.array(z.string()).default([]),
 });
 

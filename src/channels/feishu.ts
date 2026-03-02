@@ -1,24 +1,20 @@
 import { BaseChannel } from './base';
 import type { MessageBus } from '../bus/queue';
 import type { OutboundMessage } from '../bus/events';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, createReadStream } from 'fs';
-import { join, dirname } from 'path';
+import type { FeishuConfig, FeishuMessageEvent, FeishuMention } from './feishu/types';
+import { FeishuImageHandler } from './feishu/image';
+import { FeishuClient } from './feishu/client';
+import { extractTextFromCard, parseTextContent, processMentions, isGroupChat } from './feishu/parser';
 import { markdownToFeishu } from '../utils/markdownToFeishu';
-import { tmpdir } from 'os';
 
-interface FeishuConfig {
-  appId?: string;
-  appSecret?: string;
-  allowFrom?: string[];
-  verbose?: boolean;
-  [key: string]: unknown;
-}
-
+/**
+ * 飞书通道实现
+ */
 export class FeishuChannel extends BaseChannel {
   name = 'feishu';
   private verbose: boolean = true;
-  private wsClient: any = null;
-  private apiClient: any = null;
+  private client: FeishuClient | null = null;
+  private imageHandler: FeishuImageHandler | null = null;
 
   constructor(config: FeishuConfig, bus: MessageBus) {
     super(config, bus);
@@ -42,8 +38,8 @@ export class FeishuChannel extends BaseChannel {
   }
 
   async start(): Promise<void> {
-    const appId = (this.config.app_id as string) || (this.config.appId as string);
-    const appSecret = (this.config.app_secret as string) || (this.config.appSecret as string);
+    const appId = this.config.appId || (this.config as any).app_id;
+    const appSecret = this.config.appSecret || (this.config as any).app_secret;
 
     this.log('info', '=== Feishu Channel Starting (WebSocket Mode) ===');
 
@@ -56,32 +52,13 @@ export class FeishuChannel extends BaseChannel {
     this.log('info', 'App ID: %s', appId.substring(0, 8) + '...');
 
     try {
-      const lark: any = await import('@larksuiteoapi/node-sdk');
-     
-      this.apiClient = new lark.Client({
-        appId,
-        appSecret,
-        logLevel: lark.LoggerLevel.WARN,
-      });
-
-      this.wsClient = new lark.WSClient({
-        appId,
-        appSecret,
-        loggerLevel: lark.LoggerLevel.WARN,
-      });
-
-      const eventDispatcher = new lark.EventDispatcher({});
-
-      eventDispatcher.register({
-        'im.message.receive_v1': async (data: any) => {
-          await this.handleIncomingMessage(data);
-        }
-      });
-
-      this.log('info', 'Starting WebSocket connection...');
+      this.client = new FeishuClient(this.config);
+      await this.client.init();
       
-      this.wsClient.start({
-        eventDispatcher,
+      this.imageHandler = new FeishuImageHandler(this.client.apiClient);
+
+      this.client.startListening((data) => {
+        this.handleIncomingMessage(data);
       });
       
       this.running = true;
@@ -94,9 +71,44 @@ export class FeishuChannel extends BaseChannel {
     }
   }
 
-  private async handleIncomingMessage(data: any): Promise<void> {
-    try {
+  /**
+   * 检查消息中的 @ 提及是否是针对当前机器人的
+   * 只依赖 open_id 精确匹配
+   */
+  private checkBotMentioned(mentions: FeishuMention[]): boolean {
+    const botUserId = this.config.botUserId || (this.config as any).bot_user_id;
 
+    // 调试日志
+    this.log('info', '>>> DEBUG: botUserId=%s', botUserId);
+
+    for (const mention of mentions) {
+      const mentionKey = mention?.key || '';
+      const mentionId = mention?.id || {};
+      const mentionOpenId = (mentionId as any).open_id || '';
+      const mentionName = mention?.name || '';
+      
+      this.log('info', '>>> Checking: key=%s, open_id=%s, name=%s', 
+        mentionKey, mentionOpenId, mentionName);
+
+      // 精确匹配 open_id
+      if (botUserId && mentionOpenId === botUserId) {
+        this.log('info', '>>> MATCHED: is @ bot (open_id)');
+        return true;
+      }
+
+      // 回退: 只有未配置 botUserId 时才匹配任何 @
+      if (!botUserId && mentionKey.startsWith('@_user_')) {
+        this.log('info', '>>> MATCHED: fallback (no botUserId configured)');
+        return true;
+      }
+    }
+
+    this.log('info', '>>> NOT matched - message is for another user');
+    return false;
+  }
+
+  private async handleIncomingMessage(data: FeishuMessageEvent): Promise<void> {
+    try {
       const message = data?.message;
       if (!message) {
         this.log('warn', 'No message in data, keys:', Object.keys(data));
@@ -111,7 +123,7 @@ export class FeishuChannel extends BaseChannel {
 
       const senderId = sender?.sender_id?.open_id || sender?.sender_id?.user_id;
       if (!senderId) {
-        this.log('warn', 'No sender ID found, sender:', JSON.stringify(sender));
+        this.log('warn', 'No sender ID found');
         return;
       }
 
@@ -120,101 +132,47 @@ export class FeishuChannel extends BaseChannel {
         this.log('warn', 'No chat ID found');
         return;
       }
+
       const messageType = message?.message_type;
       const chatType = message?.chat_type;
       const mentions = data?.event?.mentions || message?.mentions || [];
 
       // 群聊时检查是否 @ 了机器人
-      // 放宽判断：包含 'group' 的都视为群聊
-      const isGroupChat = chatType?.includes('group');
-
-      if (isGroupChat) {
+      if (isGroupChat(chatType)) {
         if (mentions.length === 0) {
           return;
         }
 
-        // 调试：打印接收到的消息详情
-        this.log('debug', 'Group message received, mentions: %s', JSON.stringify(mentions));
+        this.log('info', '>>> Group message - mentions: %s', JSON.stringify(mentions));
 
-        const currentAppId = this.config.appId || this.config.app_id;
-
-        // 检查 mentions 数组中是否包含当前机器人
-        // mentions 结构: [{ key: "@_user_xxx", id: { user_id }, name: "用户名" }]
-        // 飞书在文本中用 @_user_xxx 表示 @ 某个用户
-        let isMentioned = false;
-        for (const mention of mentions) {
-          // 检查 key 格式：@_user_xxx
-          const mentionKey = mention?.key || '';
-          if (mentionKey.startsWith('@_user_')) {
-            // 只要消息中有 @_user_ 格式的内容，就处理（简化判断）
-            isMentioned = true;
-            this.log('debug', 'Detected mention with key: %s', mentionKey);
-            break;
-          }
-
-          // 备用：检查 id.user_id 是否匹配 app_id
-          const mentionUserId = mention?.id?.user_id;
-          if (mentionUserId && mentionUserId === currentAppId) {
-            isMentioned = true;
-            break;
-          }
-        }
+        const isMentioned = this.checkBotMentioned(mentions);
 
         if (!isMentioned) {
-          this.log('debug', 'Group message but not @ this bot, skipping');
+          this.log('info', '>>> Skipping: not @ this bot');
           return;
         }
 
-        this.log('info', 'Group message @ this bot, processing');
+        this.log('info', '>>> Processing: group message @ this bot');
       }
-      // 私聊 (p2p) 不需要检查
       
       this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
-      this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
 
-      // Handle image messages
       if (messageType === 'image') {
         await this.handleImageMessage(message, senderId, chatId, data);
         return;
       }
 
-      // Handle post messages (rich text with potential images)
       if (messageType === 'post') {
         await this.handlePostMessage(message, senderId, chatId, data);
         return;
       }
 
-      // Skip other non-text messages
       if (messageType !== 'text') {
         return;
       }
 
-      const contentJson = message?.content;
-      if (!contentJson) {
-        this.log('warn', 'No content in message');
-        return;
-      }
-
-      let content: string;
-      try {
-        const contentData = JSON.parse(contentJson);
-        content = contentData.text || '';
-      } catch {
-        content = contentJson;
-      }
-
-      // 使用 mentions 数组替换 @_user_X 占位符
-      // 飞书 text 字段中的 @_user_X 是占位符，mentions 数组包含实际被 @ 的用户信息
-      // mentions 结构: [{ user_id, key: "@_user_X", name: "用户名" }]
-      for (const mention of mentions) {
-        if (mention?.key && mention?.name) {
-          // 替换 @_user_X 为实际用户名
-          content = content.replace(new RegExp(mention.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), mention.name);
-        }
-      }
-
-      // 清理可能残留的 @_user_X 格式占位符
-      content = content.replace(/@_user_\d+\s*/g, '').trim();
+      let content = parseTextContent(message?.content);
+      content = processMentions(content, mentions);
 
       if (!content) {
         this.log('warn', 'Empty message content');
@@ -231,171 +189,19 @@ export class FeishuChannel extends BaseChannel {
         {
           message_id: message?.message_id,
           create_time: message?.create_time,
-          event_type: data?.event_type,
+          event_type: (data as any).event_type,
           msg_type: messageType,
         }
       );
-
 
     } catch (e) {
       this.log('error', 'Error handling incoming message:', e);
     }
   }
 
-  private extractTextFromCard(contentData: Record<string, unknown>): string {
-    const texts: string[] = [];
+  private async handleImageMessage(message: any, senderId: string, chatId: string, data: any): Promise<void> {
+    if (!this.imageHandler) return;
 
-    const extractFromElement = (elem: unknown): void => {
-      if (typeof elem !== 'object' || elem === null) return;
-
-      const e = elem as Record<string, unknown>;
-      const tag = e.tag as string;
-
-      if (tag === 'text' || tag === 'plain_text') {
-        if (e.text) texts.push(e.text as string);
-      } else if (tag === 'markdown') {
-        if (e.content) texts.push(e.content as string);
-      } else if (tag === 'column_set' || tag === 'columns') {
-        const elements = e.elements as unknown[];
-        if (elements) {
-          for (const child of elements) {
-            extractFromElement(child);
-          }
-        }
-      } else if (tag === 'column') {
-        const elements = e.elements as unknown[];
-        if (elements) {
-          for (const child of elements) {
-            extractFromElement(child);
-          }
-        }
-      }
-    };
-
-    if (contentData.card) {
-      const card = contentData.card as Record<string, unknown>;
-      const elements = card.elements as unknown[];
-      if (elements) {
-        for (const elem of elements) {
-          extractFromElement(elem);
-        }
-      }
-    } else {
-      const rawElements = contentData.elements as unknown[];
-      if (rawElements) {
-        for (const elemOrRow of rawElements) {
-          if (Array.isArray(elemOrRow)) {
-            for (const elem of elemOrRow) {
-              extractFromElement(elem);
-            }
-          } else {
-            extractFromElement(elemOrRow);
-          }
-        }
-      }
-    }
-
-    if (contentData.title) {
-      texts.unshift(`[${contentData.title}]`);
-    }
-
-    return texts.join('\n');
-  }
-
-  async stop(): Promise<void> {
-    this.running = false;
-    this.log('info', 'Channel stopped');
-  }
-
-  async send(msg: OutboundMessage): Promise<void> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return;
-    }
-
-    try {
-      const cardContent = JSON.stringify({
-        config: { wide_screen_mode: true },
-        elements: [{ tag: 'markdown', content: markdownToFeishu(msg.content) }],
-      });
-
-      if (msg.replyTo) {
-        const response = await this.apiClient.im.message.reply({
-          path: { message_id: msg.replyTo },
-          data: { msg_type: 'interactive', content: cardContent },
-        });
-
-        const respCode = (response as any).code;
-        
-        if (respCode === 0) {
-          this.log('info', '✓ Reply sent to %s', msg.replyTo);
-        } else {
-          this.log('error', 'Failed to reply: code=%s, msg=%s', respCode, (response as any).msg);
-        }
-        return;
-      }
-
-      const response = await this.apiClient.im.message.create({
-        params: { receive_id_type: 'chat_id' },
-        data: {
-          receive_id: msg.chatId,
-          msg_type: 'interactive',
-          content: cardContent,
-        },
-      });
-
-      const respCode = (response as any).code;
-      
-      if (respCode === 0) {
-        this.log('info', '✓ Message sent to %s', msg.chatId);
-      } else {
-        this.log('error', 'Failed to send: code=%s, msg=%s', respCode, (response as any).msg);
-      }
-
-    } catch (e: any) {
-      this.log('error', 'Error sending message: %s', e?.message || e);
-    }
-  }
-
-  async updateMessage(chatId: string, messageId: string, content: string): Promise<void> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return;
-    }
-
-    try {
-      const cardContent = JSON.stringify({
-        config: { wide_screen_mode: true },
-        elements: [{ tag: 'markdown', content: markdownToFeishu(content) }],
-      });
-
-      const response = await this.apiClient.im.message.patch({
-        path: { message_id: messageId },
-        params: { msg_type: 'interactive' },
-        data: { content: cardContent },
-      });
-
-      const respCode = (response as any).code;
-      
-      if (respCode === 0) {
-        this.log('debug', '✓ Message updated: %s', messageId);
-      } else {
-        this.log('error', 'Failed to update message: code=%s, msg=%s', respCode, (response as any).msg);
-      }
-    } catch (e: any) {
-      this.log('error', 'Error updating message: %s', e?.message || e);
-    }
-  }
-
-  /**
-   * Handle incoming image message from Feishu
-   */
-  private async handleImageMessage(
-    message: any,
-    senderId: string,
-    chatId: string,
-    data: any
-  ): Promise<void> {
     try {
       const contentJson = message?.content;
       if (!contentJson) {
@@ -418,9 +224,7 @@ export class FeishuChannel extends BaseChannel {
       }
 
       const messageId = message?.message_id;
-      this.log('info', 'Downloading image: %s, message_id: %s', imageKey, messageId);
-
-      const imagePath = await this.downloadImage(imageKey, messageId);
+      const imagePath = await this.imageHandler.downloadImage(imageKey, messageId);
 
       if (!imagePath) {
         this.log('error', 'Failed to download image');
@@ -428,7 +232,6 @@ export class FeishuChannel extends BaseChannel {
       }
 
       this.log('info', 'Image downloaded to: %s', imagePath);
-      this.log('info', 'Using local path for vision: %s', imagePath);
       
       await this.handleMessage(
         senderId,
@@ -444,23 +247,14 @@ export class FeishuChannel extends BaseChannel {
         }
       );
 
-      this.log('debug', 'Image message forwarded to bus successfully');
-
     } catch (e: any) {
       this.log('error', 'Error handling image message:', e?.message || e);
     }
   }
 
-  /**
-   * Handle incoming post message from Feishu (rich text with potential images)
-   * Handles multiple structures: body.elements, content.elements, or direct elements
-   */
-  private async handlePostMessage(
-    message: any,
-    senderId: string,
-    chatId: string,
-    data: any
-  ): Promise<void> {
+  private async handlePostMessage(message: any, senderId: string, chatId: string, data: any): Promise<void> {
+    if (!this.imageHandler) return;
+
     const mediaFiles: string[] = [];
     const textParts: string[] = [];
 
@@ -479,41 +273,17 @@ export class FeishuChannel extends BaseChannel {
         return;
       }
 
-      this.log('info', 'Post message keys: %s', Object.keys(contentData));
-      this.log('info', 'Post message content: %s', JSON.stringify(contentData).substring(0, 1000));
-      this.log('debug', 'content field type: %s', typeof contentData?.content);
-      this.log('debug', 'content field value: %s', typeof contentData?.content === 'string' ? contentData?.content : 'not a string');
-
-      // Try different possible structures
-      // Structure 1: { body: { elements: [...] } }
-      // Structure 2: { title: "...", content: { elements: [...] } } (飞书卡片消息)
-      // Structure 3: { title: "...", content: "text string" } (简单文本)
-      // Structure 4: { i18n_title_key: {...}, content: { i18n_elements: [...] } } (国际化卡片)
-      
       let elements: unknown[] | undefined = undefined;
-
-      // Try body.elements
       const body = contentData?.body as Record<string, unknown> | undefined;
       if (body?.elements) {
         elements = body.elements as unknown[];
-        this.log('debug', 'Found elements in body');
       }
 
-      // Try content (飞书富文本消息结构)
       if (!elements && contentData?.content) {
         const contentField = contentData.content;
-
-        // 富文本消息 content 是二维数组: content: [[{tag, ...}, {tag, ...}], [{tag, ...}]]
-        // 例如: [
-        //   [{"tag": "text", "text": "第一行"}, {"tag": "img", "image_key": "xxx"}]
-        //   [{"tag": "text", "text": "第二行"}]
-        // ]
         if (typeof contentField === 'object' && contentField !== null) {
           const contentObj = contentField as Record<string, unknown>;
-
-          // 检查是否是二维数组 (富文本消息)
           if (Array.isArray(contentObj)) {
-            // content 是二维数组，遍历每一行
             for (const row of contentObj) {
               if (!Array.isArray(row)) continue;
               for (const el of row) {
@@ -521,118 +291,56 @@ export class FeishuChannel extends BaseChannel {
                 const element = el as Record<string, unknown>;
                 const tag = element.tag as string;
 
-                // 处理图片元素
                 if (tag === 'img') {
                   const imageKey = element.image_key as string;
                   if (imageKey) {
-                    const messageId = message?.message_id;
-                    this.log('info', 'Downloading image from post: %s', imageKey);
-                    const imagePath = await this.downloadImage(imageKey, messageId);
-                    if (imagePath) {
-                      mediaFiles.push(imagePath);
-                      this.log('info', 'Image downloaded: %s', imagePath);
-                    }
+                    const imagePath = await this.imageHandler.downloadImage(imageKey, message?.message_id);
+                    if (imagePath) mediaFiles.push(imagePath);
                   }
-                }
-                // 处理文本元素
-                else if (tag === 'text' || tag === 'plain_text') {
+                } else if (tag === 'text' || tag === 'plain_text') {
                   const text = element.text as string || element.content as string;
                   if (text) textParts.push(text);
-                }
-                // 处理 markdown 元素
-                else if (tag === 'markdown') {
+                } else if (tag === 'markdown') {
                   const text = element.text as string || element.content as string;
                   if (text) textParts.push(text);
-                }
-                // 处理链接元素
-                else if (tag === 'a') {
+                } else if (tag === 'a') {
                   const text = element.text as string;
                   const href = element.href as string;
                   if (text) textParts.push(`${text} (${href})`);
-                }
-                // 处理 @ 提及
-                else if (tag === 'at') {
+                } else if (tag === 'at') {
                   const userName = element.user_name as string;
                   if (userName) textParts.push(`@${userName}`);
                 }
               }
             }
-            this.log('debug', 'Processed content as 2D array');
           }
-          // Try elements (卡片消息结构)
-          else if (contentObj?.elements) {
-            elements = contentObj.elements as unknown[];
-            this.log('debug', 'Found elements in content.elements');
-          }
-          // Try i18n_elements (国际化)
-          else if (contentObj?.i18n_elements) {
-            elements = contentObj.i18n_elements as unknown[];
-            this.log('debug', 'Found elements in content.i18n_elements');
-          }
-          // Try extracting text from content object
-          else if (!textParts.length && contentObj?.text) {
-            textParts.push(contentObj.text as string);
-          }
-        } else if (typeof contentField === 'string') {
-          // Content is a string, use as text
-          textParts.push(contentField);
-          this.log('debug', 'Using content as text string');
-      }
-      }
-
-      // Try direct elements array
-      if (!elements && contentData?.elements) {
-        elements = contentData.elements as unknown[];
-        this.log('debug', 'Found elements at root level');
-      }
-
-      // Try i18n_elements at root level (国际化卡片)
-      if (!elements && contentData?.i18n_elements) {
-        elements = contentData.i18n_elements as unknown[];
-        this.log('debug', 'Found i18n_elements at root level');
-      }
-
-      // Extract title
-      if (contentData?.title) {
-        textParts.push(`[${contentData.title}]`);
-      }
-
-      // Try i18n_title
-      if (!textParts.length && contentData?.i18n_title) {
-        const i18nTitle = contentData.i18n_title as Record<string, unknown>;
-        if (i18nTitle?.zh_cn) {
-          textParts.push(`[${i18nTitle.zh_cn}]`);
         }
       }
 
-      // Process elements if found
+      if (!elements && contentData?.elements) {
+        elements = contentData.elements as unknown[];
+      }
+
+      if (contentData?.title) {
+        textParts.unshift(`[${contentData.title}]`);
+      }
+
       if (elements && Array.isArray(elements)) {
         for (const element of elements) {
           if (!element || typeof element !== 'object') continue;
-
           const el = element as Record<string, unknown>;
           const tag = el.tag as string;
 
-          // Handle image element
           if (tag === 'img') {
             const imageKey = el?.image_key as string;
             if (imageKey) {
-              const messageId = message?.message_id;
-              this.log('info', 'Downloading image from post: %s', imageKey);
-              const imagePath = await this.downloadImage(imageKey, messageId);
-              if (imagePath) {
-                mediaFiles.push(imagePath);
-                this.log('info', 'Image downloaded: %s', imagePath);
-              }
+              const imagePath = await this.imageHandler.downloadImage(imageKey, message?.message_id);
+              if (imagePath) mediaFiles.push(imagePath);
             }
-          }
-          // Handle text element
-          else if (tag === 'text' || tag === 'plain_text') {
+          } else if (tag === 'text' || tag === 'plain_text') {
             const text = el?.text as string || el?.content as string;
             if (text) textParts.push(text);
-          }
-          // Handle markdown element
-          else if (tag === 'markdown') {
+          } else if (tag === 'markdown') {
             const text = el?.text as string || el?.content as string;
             if (text) textParts.push(text);
           }
@@ -645,8 +353,6 @@ export class FeishuChannel extends BaseChannel {
         this.log('warn', 'Empty post message');
         return;
       }
-
-      this.log('info', 'Post message: text=%s, images=%s', content.substring(0, 50), mediaFiles.length);
 
       await this.handleMessage(
         senderId,
@@ -661,124 +367,69 @@ export class FeishuChannel extends BaseChannel {
         }
       );
 
-      this.log('debug', 'Post message forwarded to bus successfully');
-
     } catch (e: any) {
       this.log('error', 'Error handling post message:', e?.message || e);
     }
   }
 
-  /**
-   * Download image from Feishu API and save to temp directory
-   */
-  private async downloadImage(imageKey: string, messageId?: string): Promise<string | null> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return null;
+  async stop(): Promise<void> {
+    this.running = false;
+    this.log('info', 'Channel stopped');
+  }
+
+  async send(msg: OutboundMessage): Promise<void> {
+    if (!this.client) {
+      this.log('error', 'Client not initialized');
+      return;
     }
 
     try {
-      const tempDir = join(tmpdir(), 'nanobot_feishu_images');
-      if (!existsSync(tempDir)) {
-        mkdirSync(tempDir, { recursive: true });
-      }
+      const content = markdownToFeishu(msg.content);
 
-      let response: any;
-
-      if (messageId) {
-        this.log('debug', 'Using im.messageResource.get API with message_id: %s', messageId);
-        response = await this.apiClient.im.messageResource.get({
-          path: { message_id: messageId, file_key: imageKey },
-          params: { type: 'image' },
-        });
-      } else {
-        this.log('debug', 'Using im.image.get API with image_key: %s', imageKey);
-        response = await this.apiClient.im.image.get({
-          path: { image_key: imageKey },
-        });
-      }
-
-      this.log('debug', 'Response keys: %s', Object.keys(response));
-      
-      if (response.code !== undefined && response.code !== 0) {
-        this.log('error', 'Feishu API error: code=%s, msg=%s', response.code, response.msg);
-        return null;
-      }
-
-      let ext = 'png';
-      if (response.headers && response.headers['content-type']) {
-        const contentType = response.headers['content-type'];
-        if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = 'jpg';
-        else if (contentType.includes('gif')) ext = 'gif';
-        else if (contentType.includes('webp')) ext = 'webp';
-      }
-
-      const imagePath = join(tempDir, `feishu_${imageKey}_${Date.now()}.${ext}`);
-      
-      if (response.data && Buffer.isBuffer(response.data)) {
-        writeFileSync(imagePath, response.data);
-      } else if (typeof response.writeFile === 'function') {
-        await response.writeFile(imagePath);
-      } else if (typeof response.getReadableStream === 'function') {
-        const stream = response.getReadableStream();
-        const chunks: Buffer[] = [];
-        for await (const chunk of stream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      if (msg.replyTo) {
+        const response = await this.client.replyMessage(msg.replyTo, content);
+        const respCode = (response as any).code;
+        
+        if (respCode === 0) {
+          this.log('info', '✓ Reply sent to %s', msg.replyTo);
+        } else {
+          this.log('error', 'Failed to reply: code=%s, msg=%s', respCode, (response as any).msg);
         }
-        writeFileSync(imagePath, Buffer.concat(chunks));
-      } else {
-        this.log('error', 'Unexpected image response format, keys: %s', Object.keys(response));
-        return null;
+        return;
       }
 
-      return imagePath;
+      const response = await this.client.sendMessage(msg.chatId, content);
+      const respCode = (response as any).code;
+      
+      if (respCode === 0) {
+        this.log('info', '✓ Message sent to %s', msg.chatId);
+      } else {
+        this.log('error', 'Failed to send: code=%s, msg=%s', respCode, (response as any).msg);
+      }
 
     } catch (e: any) {
-      this.log('error', 'Failed to download image: %s', e?.message || e);
-      return null;
+      this.log('error', 'Error sending message: %s', e?.message || e);
     }
   }
 
-  /**
-   * Upload image to Feishu and return accessible URL for vision models
-   */
-  private async uploadImageForVision(imagePath: string): Promise<string | null> {
-    if (!this.apiClient) {
-      this.log('error', 'API client not initialized');
-      return null;
+  async updateMessage(chatId: string, messageId: string, content: string): Promise<void> {
+    if (!this.client) {
+      this.log('error', 'Client not initialized');
+      return;
     }
 
     try {
-      this.log('debug', 'Uploading image to Feishu for vision: %s', imagePath);
-
-      const response = await this.apiClient.im.image.create({
-        data: {
-          image_type: 'message',
-          image: createReadStream(imagePath) as any,
-        },
-      }) as any;
-
-      this.log('debug', 'Upload response: %s', JSON.stringify(response));
+      const cardContent = markdownToFeishu(content);
+      const response = await this.client.updateMessage(messageId, cardContent);
+      const respCode = (response as any).code;
       
-      if (response.code !== undefined && response.code !== 0) {
-        this.log('error', 'Failed to upload image to Feishu: code=%s, msg=%s', response.code, response.msg);
-        return null;
+      if (respCode === 0) {
+        this.log('debug', '✓ Message updated: %s', messageId);
+      } else {
+        this.log('error', 'Failed to update message: code=%s, msg=%s', respCode, (response as any).msg);
       }
-
-      const imageKey = response.data?.image_key || response.image_key;
-      if (!imageKey) {
-        this.log('error', 'No image_key returned from Feishu upload, response: %s', JSON.stringify(response));
-        return null;
-      }
-
-      const imageUrl = `https://open.feishu.cn/open-apis/im/v1/images/${imageKey}`;
-      this.log('debug', 'Image uploaded, URL: %s', imageUrl);
-
-      return imageUrl;
-
     } catch (e: any) {
-      this.log('error', 'Failed to upload image for vision: %s', e?.message || e);
-      return null;
+      this.log('error', 'Error updating message: %s', e?.message || e);
     }
   }
 }
