@@ -158,12 +158,12 @@ export class FeishuChannel extends BaseChannel {
       this.log('info', 'Received message: type=%s, from=%s, chat=%s', messageType, senderId, chatId);
 
       if (messageType === 'image') {
-        await this.handleImageMessage(message, senderId, chatId, data);
+        await this.handleImageMessage(message, senderId, chatId, data, sender);
         return;
       }
 
       if (messageType === 'post') {
-        await this.handlePostMessage(message, senderId, chatId, data);
+        await this.handlePostMessage(message, senderId, chatId, data, sender);
         return;
       }
 
@@ -181,6 +181,9 @@ export class FeishuChannel extends BaseChannel {
 
       this.log('info', 'Forwarding to bus: "%s"...', content.substring(0, 50));
 
+      // 发送者 ID（飞书只提供 open_id/user_id，不提供名称）
+      const senderName = '';
+
       await this.handleMessage(
         senderId,
         chatId,
@@ -191,6 +194,9 @@ export class FeishuChannel extends BaseChannel {
           create_time: message?.create_time,
           event_type: (data as any).event_type,
           msg_type: messageType,
+          chat_type: chatType,           // 群聊/私聊
+          mentions: mentions,            // 原始 mentions 数组
+          sender_name: senderName,       // 发送者名称
         }
       );
 
@@ -199,7 +205,7 @@ export class FeishuChannel extends BaseChannel {
     }
   }
 
-  private async handleImageMessage(message: any, senderId: string, chatId: string, data: any): Promise<void> {
+  private async handleImageMessage(message: any, senderId: string, chatId: string, data: any, sender?: any): Promise<void> {
     if (!this.imageHandler) return;
 
     try {
@@ -231,6 +237,9 @@ export class FeishuChannel extends BaseChannel {
         return;
       }
 
+      // 提取发送者信息
+      const senderName = sender?.sender_id?.name || '';
+
       this.log('info', 'Image downloaded to: %s', imagePath);
       
       await this.handleMessage(
@@ -244,6 +253,9 @@ export class FeishuChannel extends BaseChannel {
           event_type: data?.event_type,
           msg_type: 'image',
           image_key: imageKey,
+          chat_type: message?.chat_type,    // 群聊/私聊
+          mentions: message?.mentions || [], // mentions 数组
+          sender_name: senderName,           // 发送者名称
         }
       );
 
@@ -252,7 +264,7 @@ export class FeishuChannel extends BaseChannel {
     }
   }
 
-  private async handlePostMessage(message: any, senderId: string, chatId: string, data: any): Promise<void> {
+  private async handlePostMessage(message: any, senderId: string, chatId: string, data: any, sender?: any): Promise<void> {
     if (!this.imageHandler) return;
 
     const mediaFiles: string[] = [];
@@ -347,6 +359,9 @@ export class FeishuChannel extends BaseChannel {
         }
       }
 
+      // 提取发送者信息
+      const senderName = sender?.sender_id?.name || '';
+
       const content = textParts.join('\n') || '[富文本消息]';
 
       if (!content && mediaFiles.length === 0) {
@@ -364,6 +379,9 @@ export class FeishuChannel extends BaseChannel {
           create_time: message?.create_time,
           event_type: data?.event_type,
           msg_type: 'post',
+          chat_type: message?.chat_type,       // 群聊/私聊
+          mentions: message?.mentions || [],   // mentions 数组
+          sender_name: senderName,             // 发送者名称
         }
       );
 
