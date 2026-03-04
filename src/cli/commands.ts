@@ -11,7 +11,7 @@ import {
 import { getWorkspacePath } from "../utils/helpers";
 import { AgentLoop, ProgressEvent } from "../agent/loop";
 import { MessageBus } from "../bus/queue";
-import { getSessionKey } from "../bus/events";
+import { getSessionKey, type InboundMessage } from "../bus/events";
 import { ChannelManager } from "../channels/manager";
 import { CronService } from "../cron/service";
 import { HeartbeatService } from "../heartbeat/service";
@@ -324,9 +324,12 @@ gatewayCmd
               braveApiKey: config.tools?.web?.search?.api_key,
             });
 
+            // 构建带上下文的消息内容
+            const contextMessage = buildContextMessage(inboundMsg);
+
             // 调用 AgentLoop 处理消息
             const response = await progressAgent.processDirect(
-              inboundMsg.content,
+              contextMessage,
               sessionKey,
               inboundMsg.media,
             );
@@ -560,6 +563,77 @@ program
       );
     }
   });
+
+/**
+ * 飞书 @ 提及结构
+ */
+interface FeishuMentionInfo {
+  key: string;
+  id?: {
+    user_id?: string;
+    union_id?: string;
+    open_id?: string;
+  };
+  name: string;
+}
+
+/**
+ * 构建带上下文的消息内容
+ * 在消息开头附加发送者、会话、消息ID、时间、提及等上下文信息
+ */
+function buildContextMessage(inboundMsg: InboundMessage): string {
+  const { content, metadata } = inboundMsg;
+
+  // 如果没有 metadata 或为空，直接返回原内容
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return content;
+  }
+
+  const parts: string[] = ['[消息上下文]'];
+
+  // 发送者
+  if (inboundMsg.senderId) {
+    const senderName = metadata.sender_name as string;
+    if (senderName) {
+      parts.push(`发送者: ${senderName}(${inboundMsg.senderId})`);
+    } else {
+      parts.push(`发送者: ${inboundMsg.senderId}`);
+    }
+  }
+
+  // 会话
+  const chatType = metadata.chat_type as string;
+  const chatTypeLabel = chatType?.includes('group') ? '群聊' : '私聊';
+  parts.push(`会话: ${inboundMsg.chatId} (${chatTypeLabel})`);
+
+  // 消息ID
+  if (metadata.message_id) {
+    parts.push(`消息ID: ${metadata.message_id}`);
+  }
+
+  // 时间
+  if (metadata.create_time) {
+    // 飞书时间戳是毫秒
+    const timestamp = parseInt(String(metadata.create_time));
+    if (!isNaN(timestamp)) {
+      const date = new Date(timestamp);
+      parts.push(`时间: ${date.toLocaleString('zh-CN')}`);
+    }
+  }
+
+  // 提及
+  const mentions = metadata.mentions as FeishuMentionInfo[] | undefined;
+  if (mentions && Array.isArray(mentions) && mentions.length > 0) {
+    const mentionStrs = mentions.map(m => {
+      const name = m.name || '未知';
+      const openId = m.id?.open_id || m.id?.user_id || '';
+      return openId ? `@${name}(${openId})` : `@${name}`;
+    });
+    parts.push(`提及: ${mentionStrs.join(', ')}`);
+  }
+
+  return parts.join('\n') + '\n\n---\n\n' + content;
+}
 
 function createProvider(config: ReturnType<typeof loadConfig>) {
   // 配置文件可能是 camelCase 或 snake_case，都兼容
