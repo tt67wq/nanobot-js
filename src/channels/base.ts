@@ -20,7 +20,10 @@ export abstract class BaseChannel {
   abstract send(msg: OutboundMessage): Promise<void>;
 
   isAllowed(senderId: string): boolean {
-    const allowList = (this.config.allowFrom as string[]) ?? [];
+    // 支持 camelCase (用户配置) 和 snake_case (loader 转换后) 两种格式
+    const allowList = ((this.config.allowFrom as string[])
+      || (this.config.allow_from as string[])
+      ) ?? [];
 
     if (!allowList.length) {
       return true;

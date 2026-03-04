@@ -23,9 +23,11 @@ export class ChannelManager {
     if (this.config.channels?.feishu?.enabled) {
       try {
         // 合并 feishu 配置和 channels 级别配置（如 fallback_message）
+        // 优先使用 feishu 内部的 fallback_message
         const feishuConfig = {
           ...this.config.channels.feishu,
-          fallback_message: this.config.channels.fallback_message,
+          fallback_message: this.config.channels.feishu.fallback_message
+            || this.config.channels.fallback_message,
         };
         logger.info(
           "Feishu channel creating, config: %s",

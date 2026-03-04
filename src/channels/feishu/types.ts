@@ -7,6 +7,7 @@ export interface FeishuConfig {
   appSecret?: string;
   botUserId?: string;
   allowFrom?: string[];
+  fallbackMessage?: string;
   verbose?: boolean;
   [key: string]: unknown;
 }

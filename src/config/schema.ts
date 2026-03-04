@@ -10,6 +10,8 @@ export const FeishuConfigSchema = z.object({
   app_secret: z.string().default(""),
   bot_user_id: z.string().default(""),
   allow_from: z.array(z.string()).default([]),
+  // 通道级别的 fallback 消息
+  fallback_message: z.string().optional(),
 });
 
 export type FeishuConfig = z.infer<typeof FeishuConfigSchema>;
