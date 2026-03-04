@@ -22,15 +22,18 @@ export class ChannelManager {
   private initChannels(): void {
     if (this.config.channels?.feishu?.enabled) {
       try {
-        // 传递完整 channels 配置，以便访问 fallback_message
-        const feishuConfig = this.config.channels as Record<string, unknown>;
+        // 合并 feishu 配置和 channels 级别配置（如 fallback_message）
+        const feishuConfig = {
+          ...this.config.channels.feishu,
+          fallback_message: this.config.channels.fallback_message,
+        };
         logger.info(
           "Feishu channel creating, config: %s",
           JSON.stringify(feishuConfig),
         );
         this.channels.set(
           "feishu",
-          new FeishuChannel(feishuConfig, this.bus),
+          new FeishuChannel(feishuConfig as Record<string, unknown>, this.bus),
         );
         logger.info("Feishu channel enabled");
       } catch (e) {
