@@ -16,6 +16,8 @@ export type FeishuConfig = z.infer<typeof FeishuConfigSchema>;
 
 export const ChannelsConfigSchema = z.object({
   feishu: FeishuConfigSchema.default(() => FeishuConfigSchema.parse({})),
+  // 白名单外的 fallback 消息
+  fallback_message: z.string().default("未授权用户访问，请委婉拒绝并说明原因。"),
 });
 
 export type ChannelsConfig = z.infer<typeof ChannelsConfigSchema>;
