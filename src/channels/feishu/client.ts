@@ -105,4 +105,29 @@ export class FeishuClient {
       data: { content: cardContent },
     });
   }
+
+  /**
+   * 获取群聊信息
+   * @param chatId 群聊 ID
+   * @returns 群聊信息（包含名称）
+   */
+  async getChatInfo(chatId: string): Promise<{ name: string; avatar: string; ownerId: string } | null> {
+    try {
+      const response = await this.apiClient.im.chat.get({
+        path: { chat_id: chatId },
+      });
+      
+      if (response.data && response.data.chat) {
+        return {
+          name: response.data.chat.name || '未命名群聊',
+          avatar: response.data.chat.avatar || '',
+          ownerId: response.data.chat.owner_id || '',
+        };
+      }
+      return null;
+    } catch (e) {
+      console.error('[FeishuClient] Failed to get chat info:', e);
+      return null;
+    }
+  }
 }
