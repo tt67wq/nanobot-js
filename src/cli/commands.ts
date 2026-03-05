@@ -104,6 +104,7 @@ agentCmd
       model: config.agents.defaults.model,
       maxIterations: config.agents.defaults.max_tool_iterations,
       thinking: config.agents.defaults.thinking,
+      enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
     });
@@ -172,6 +173,7 @@ gatewayCmd
       model: config.agents.defaults.model,
       maxIterations: config.agents.defaults.max_tool_iterations,
       thinking: config.agents.defaults.thinking,
+      enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
     });
@@ -319,6 +321,7 @@ gatewayCmd
               model: config.agents.defaults.model,
               maxIterations: config.agents.defaults.max_tool_iterations,
               thinking: config.agents.defaults.thinking,
+              enableProgress: config.agents.defaults.progress_events,
               onProgress: progressHandler,
               bus,
               braveApiKey: config.tools?.web?.search?.api_key,

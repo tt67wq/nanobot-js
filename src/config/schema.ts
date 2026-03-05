@@ -32,6 +32,8 @@ export const AgentDefaultsSchema = z.object({
   max_tool_iterations: z.number().int().default(20),
   // 是否启用 thinking (扩展思考)
   thinking: z.boolean().default(false),
+  // 是否发送进度事件回调
+  progress_events: z.boolean().default(true),
 });
 
 export type AgentDefaults = z.infer<typeof AgentDefaultsSchema>;

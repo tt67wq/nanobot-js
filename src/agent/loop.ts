@@ -42,6 +42,8 @@ export interface AgentLoopOptions {
   thinking?: boolean;
   /** 进度回调函数 - 在工具执行时通知外部 */
   onProgress?: (event: ProgressEvent) => void;
+  /** 是否启用进度事件回调，默认 true */
+  enableProgress?: boolean;
   /** 消息总线 - 用于 subagent 通知 */
   bus?: MessageBus;
   /** Brave API Key - 用于 subagent 的 web 搜索 */
@@ -58,6 +60,7 @@ export class AgentLoop {
   private verbose: boolean = true;
   private currentSessionKey: string = "cli:direct";
   private thinking: boolean = false;
+  private enableProgress: boolean = true;
   private onProgress?: (event: ProgressEvent) => void;
   private subagentManager?: SubagentManager;
   
@@ -76,6 +79,7 @@ export class AgentLoop {
     this.maxIterations = options?.maxIterations ?? 20;
     this.verbose = options?.verbose ?? true;
     this.thinking = options?.thinking ?? false;
+    this.enableProgress = options?.enableProgress ?? true;
     this.onProgress = options?.onProgress;
     
     // 初始化 SubagentManager
@@ -167,6 +171,7 @@ export class AgentLoop {
    * 触发进度事件回调
    */
   private emitProgress(event: ProgressEvent): void {
+    if (!this.enableProgress) return;
     if (this.onProgress) {
       try {
         this.onProgress(event);
