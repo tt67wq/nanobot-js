@@ -152,10 +152,40 @@ export class Logger {
 
   /** Format message with placeholders */
   private formatMessage(msg: string, args: unknown[]): string {
-    let result = msg;
-    for (const arg of args) {
-      result = result.replace('%s', this.safeStringify(arg));
-    }
+    if (args.length === 0) return msg;
+    
+    // 先处理双百分号 %% 转义
+    let result = msg.replace(/%%/g, '\x00PLACEHOLDER\x00');
+    let argIndex = 0;
+    
+    // 处理 %.0f, %.1f 等浮点数格式
+    result = result.replace(/%\.(\d+)f/g, () => {
+      if (argIndex >= args.length) return '%f';
+      const arg = args[argIndex++];
+      const num = typeof arg === 'number' ? arg : parseFloat(String(arg));
+      if (isNaN(num)) return String(arg);
+      const decimals = parseInt(result.match(/%\.(\d+)f/)?.[1] || '0');
+      return num.toFixed(decimals);
+    });
+    
+    // 处理 %f (不带小数位数)
+    result = result.replace(/%f/g, () => {
+      if (argIndex >= args.length) return '%f';
+      const arg = args[argIndex++];
+      const num = typeof arg === 'number' ? arg : parseFloat(String(arg));
+      return isNaN(num) ? String(arg) : String(num);
+    });
+    
+    // 顺序替换 %d 和 %s
+    result = result.replace(/%[sd]/g, () => {
+      if (argIndex >= args.length) return '%s';
+      const arg = args[argIndex++];
+      return String(arg);
+    });
+    
+    // 恢复双百分号
+    result = result.replace(/\x00PLACEHOLDER\x00/g, '%');
+    
     return result;
   }
 

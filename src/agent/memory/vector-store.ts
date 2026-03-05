@@ -16,6 +16,9 @@ const logger = new Logger({ module: "VectorStore" });
 // 表名
 const MEMORY_TABLE = "memories";
 
+// 全局初始化标志，避免重复初始化
+let globalInitialized = false;
+
 /**
  * 记忆向量存储
  * 使用 LanceDB 进行语义检索
@@ -35,6 +38,12 @@ export class VectorStore {
    * 初始化数据库连接
    */
   async initialize(): Promise<void> {
+    // 避免重复初始化（全局单例）
+    if (globalInitialized) {
+      this.initialized = true;
+      return;
+    }
+    
     if (this.initialized) return;
 
     // 确保目录存在
@@ -46,6 +55,7 @@ export class VectorStore {
       this.db = await vectordb.connect(this.dbPath);
       await this.ensureTable();
       this.initialized = true;
+      globalInitialized = true;
       logger.debug("Vector store initialized at %s", this.dbPath);
     } catch (error) {
       logger.error("Failed to initialize vector store: %s", String(error));
@@ -61,9 +71,27 @@ export class VectorStore {
 
     const tables = await this.db.tableNames();
     if (!tables.includes(MEMORY_TABLE)) {
-      // 创建表（使用内存中的 embedding，不依赖外部 embedding function）
-      await this.db.createTable(MEMORY_TABLE, makeArrowTable([]));
-      logger.debug("Created memory table");
+      // 创建表时需要定义 schema
+      // 使用 makeArrowTable 创建一个带 schema 的空表
+      const emptyData = [{
+        id: "__init__",
+        type: "identity" as const,
+        content: "__init__",
+        confidence: 0,
+        source: "explicit" as const,
+        importance: 0,
+        created_at: new Date().toISOString(),
+        last_accessed: new Date().toISOString(),
+        access_count: 0,
+        vector: new Array(this.embeddingService.getDimensions()).fill(0),
+      }];
+      
+      const table = await this.db.createTable(MEMORY_TABLE, makeArrowTable(emptyData));
+      
+      // 删除初始化记录
+      await table.delete('id = "__init__"');
+      
+      logger.debug("Created memory table with schema");
     }
   }
 

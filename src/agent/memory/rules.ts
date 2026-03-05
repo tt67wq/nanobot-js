@@ -4,6 +4,9 @@
  */
 
 import type { MemoryType, MemoryInput } from "./types.js";
+import { Logger } from "../../utils/logger.js";
+
+const logger = new Logger({ module: "MemoryRules" });
 
 // 规则匹配结果
 export interface RuleMatch {
@@ -176,6 +179,13 @@ export class MemoryRules {
           });
         }
       }
+    }
+
+    if (results.length > 0) {
+      logger.info("[记忆] 提取到 %d 条记忆: %s", 
+        results.length, 
+        results.map(r => `${r.type}:${r.content}`).join(", ")
+      );
     }
 
     return results;

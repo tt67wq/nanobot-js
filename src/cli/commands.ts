@@ -109,6 +109,15 @@ agentCmd
       braveApiKey: config.tools?.web?.search?.api_key,
     });
 
+    // 配置并初始化记忆检索系统
+    if (config.embedding?.enabled && config.embedding.api_key) {
+      agent.context.setMemorySearch({
+        apiKey: config.embedding.api_key,
+        apiBase: config.embedding.api_base || undefined,
+        model: config.embedding.model,
+      });
+    }
+
     // Parse image paths
     const media = options.image 
       ? options.image.split(',').map((p: string) => p.trim())
@@ -177,6 +186,15 @@ gatewayCmd
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
     });
+
+    // 配置并初始化记忆检索系统
+    if (config.embedding?.enabled && config.embedding.api_key) {
+      agent.context.setMemorySearch({
+        apiKey: config.embedding.api_key,
+        apiBase: config.embedding.api_base || undefined,
+        model: config.embedding.model,
+      });
+    }
 
     const cronStorePath = join(getDataDir(), "cron", "jobs.json");
     const cronDir = dirname(cronStorePath);
@@ -327,14 +345,25 @@ gatewayCmd
               braveApiKey: config.tools?.web?.search?.api_key,
             });
 
+            // 配置并初始化记忆检索系统
+            if (config.embedding?.enabled && config.embedding.api_key) {
+              await progressAgent.context.setMemorySearch({
+                apiKey: config.embedding.api_key,
+                apiBase: config.embedding.api_base || undefined,
+                model: config.embedding.model,
+              });
+            }
+
             // 构建带上下文的消息内容
             const contextMessage = buildContextMessage(inboundMsg);
 
             // 调用 AgentLoop 处理消息
+            // ★ 传入原始消息 content 用于记忆系统，增强后的 contextMessage 用于 LLM
             const response = await progressAgent.processDirect(
               contextMessage,
               sessionKey,
               inboundMsg.media,
+              { rawContent: inboundMsg.content },
             );
 
             // 将响应发布到出站队列

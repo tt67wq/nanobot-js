@@ -52,7 +52,7 @@ export interface AgentLoopOptions {
 
 export class AgentLoop {
   private tools: ToolRegistry;
-  private context: ContextBuilder;
+  public context: ContextBuilder;
   private sessions: SessionManager;
   private contextCleaner!: ContextCleaner;
   private model: string;
@@ -114,6 +114,9 @@ export class AgentLoop {
     
     this.context = new ContextBuilder(workspace, null, skillsLoader);
     logger.debug('SkillsLoader passed to ContextBuilder');
+
+    // 注意：记忆检索系统需要外部调用 setMemorySearch 后才会初始化
+    // 在 commands.ts 中配置
     
     this._registerDefaultTools();
     
@@ -182,16 +185,29 @@ export class AgentLoop {
   }
 
   async processDirect(
-    content: string, 
+    content: string,
     sessionKey: string = "cli:direct",
-    media?: string[]
+    media?: string[],
+    options?: {
+      /** 原始消息内容，用于记忆系统（当 content 被增强时传递） */
+      rawContent?: string;
+    }
   ): Promise<string> {
     // Update current session key for ClearContextTool
     this.currentSessionKey = sessionKey;
     
+    // ★ 优先使用原始消息内容进行记忆操作（当 content 被增强时，rawContent 包含真实用户输入）
+    const memoryContent = options?.rawContent ?? content;
+    
     logger.info('=== processDirect() called ===');
     logger.info('Session: %s, Content: "%s", Media: %s', sessionKey, content.substring(0, 50), media?.length ?? 0);
-    
+
+    // 提取并存储用户消息中的记忆（使用原始消息）
+    await this.context.extractMemoryFromMessage(memoryContent);
+
+    // 检索相关记忆（使用原始消息）
+    const relevantMemory = await this.context.searchMemory(memoryContent);
+
     const session = this.sessions.getOrCreate(sessionKey);
     
     // Build user content with optional image support
@@ -233,7 +249,12 @@ export class AgentLoop {
         content: userContent
       }
     ];
-    
+
+    // 如果有检索到相关记忆，注入到 system prompt 中
+    if (relevantMemory) {
+      messages[0].content = messages[0].content + "\n\n" + relevantMemory;
+    }
+
     let iteration = 0;
     let finalContent: string | null = null;
     

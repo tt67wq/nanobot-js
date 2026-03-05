@@ -130,8 +130,15 @@ export class EmbeddingService {
    * 获取向量维度
    */
   getDimensions(): number {
-    // text-embedding-3-small 是 1536 维
-    return 1536;
+    // 根据模型返回对应维度
+    const modelDimensions: Record<string, number> = {
+      'text-embedding-3-small': 1536,
+      'text-embedding-3-large': 3072,
+      'text-embedding-v4': 1024,
+      'text-embedding-ada-002': 1536,
+    };
+    
+    return modelDimensions[this.config.model] || 1536;
   }
 
   /**

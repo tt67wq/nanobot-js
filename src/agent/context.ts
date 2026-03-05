@@ -11,6 +11,9 @@ import { Logger } from "../utils/logger.js";
 // 延迟导入记忆模块，避免循环依赖
 let memorySearchModule: typeof import("./memory/index.js") | null = null;
 
+// 静态标志：全局只初始化一次
+let globalMemorySearchInitialized = false;
+
 async function getMemorySearch() {
   if (!memorySearchModule) {
     memorySearchModule = await import("./memory/index.js");
@@ -40,8 +43,22 @@ class ContextBuilder {
   /**
    * 设置记忆检索配置
    */
-  setMemorySearch(embeddingConfig: { apiKey: string; apiBase?: string; model?: string } | null): void {
+  async setMemorySearch(embeddingConfig: { apiKey: string; apiBase?: string; model?: string } | null): Promise<void> {
+    // 如果当前 context 已经有 memorySearch，说明已经初始化过了
+    if (this.memorySearch) {
+      logger.debug("[记忆] 当前 context 已初始化记忆系统，跳过");
+      return;
+    }
+    
+    // 标记全局已初始化（避免重复加载模块）
+    globalMemorySearchInitialized = true;
+    
     this.embeddingConfig = embeddingConfig;
+    
+    // 配置后初始化
+    if (embeddingConfig?.apiKey) {
+      await this.initializeMemorySearch();
+    }
   }
 
   /**
@@ -65,7 +82,8 @@ class ContextBuilder {
 
       this.memorySearch = new MemorySearch(this.workspace, embeddingService);
       await this.memorySearch.initialize();
-      logger.debug("Memory search initialized");
+      logger.info("[记忆] 记忆检索系统初始化成功 (向量搜索: %s)", 
+        this.memorySearch.isVectorSearchEnabled() ? "启用" : "禁用");
     } catch (error) {
       logger.error("Failed to initialize memory search: %s", String(error));
     }
@@ -75,7 +93,9 @@ class ContextBuilder {
    * 从用户消息中提取并存储记忆
    */
   async extractMemoryFromMessage(text: string): Promise<void> {
-    if (!this.memorySearch) return;
+    if (!this.memorySearch) {
+      return;
+    }
 
     try {
       const memory = await getMemorySearch();
@@ -87,7 +107,11 @@ class ContextBuilder {
       // 提取并存储记忆
       const items = await memoryExtractor.extractAndStore(text);
       if (items.length > 0) {
-        logger.debug("Extracted %d memories from message", items.length);
+        logger.info("[记忆] 已保存 %d 条记忆到存储", items.length);
+        for (const item of items) {
+          logger.info("[记忆] - [%s] %s (置信度: %.0f%%)", 
+            item.type, item.content, item.confidence * 100);
+        }
       }
     } catch (error) {
       logger.error("Failed to extract memory: %s", String(error));
@@ -105,7 +129,15 @@ class ContextBuilder {
     try {
       const results = await this.memorySearch.search(query, { limit });
       if (results.length === 0) {
+        logger.debug("[记忆] 未找到相关记忆");
         return "";
+      }
+
+      logger.info("[记忆] 检索到 %d 条相关记忆:", results.length);
+      for (const result of results) {
+        const item = result.item;
+        logger.info("[记忆] - [%s] %s (相关度: %.0f%%)", 
+          item.type, item.content, result.score * 100);
       }
 
       // 格式化为可读文本
