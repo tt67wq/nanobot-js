@@ -6,6 +6,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { IMemoryStore, ISkillsLoader, BOOTSTRAP_FILES } from "./types.js";
 import type { Message, ContentPart } from "../providers/base.js";
+import { Logger } from "../utils/logger.js";
+
+// 延迟导入记忆模块，避免循环依赖
+let memorySearchModule: typeof import("./memory/index.js") | null = null;
+
+async function getMemorySearch() {
+  if (!memorySearchModule) {
+    memorySearchModule = await import("./memory/index.js");
+  }
+  return memorySearchModule;
+}
+
+const logger = new Logger({ module: "ContextBuilder" });
 
 interface MediaContentItem {
   type: string;
@@ -21,6 +34,92 @@ class ContextBuilder {
   workspace: string;
   memory: IMemoryStore;
   skills: ISkillsLoader;
+  private memorySearch: any = null;
+  private embeddingConfig: any = null;
+
+  /**
+   * 设置记忆检索配置
+   */
+  setMemorySearch(embeddingConfig: { apiKey: string; apiBase?: string; model?: string } | null): void {
+    this.embeddingConfig = embeddingConfig;
+  }
+
+  /**
+   * 初始化记忆检索
+   */
+  async initializeMemorySearch(): Promise<void> {
+    if (!this.embeddingConfig?.apiKey) {
+      logger.debug("Embedding not configured, skipping memory search init");
+      return;
+    }
+
+    try {
+      const memory = await getMemorySearch();
+      const { EmbeddingService, MemorySearch } = memory;
+
+      const embeddingService = EmbeddingService.fromConfig({
+        apiKey: this.embeddingConfig.apiKey,
+        apiBase: this.embeddingConfig.apiBase,
+        model: this.embeddingConfig.model,
+      });
+
+      this.memorySearch = new MemorySearch(this.workspace, embeddingService);
+      await this.memorySearch.initialize();
+      logger.debug("Memory search initialized");
+    } catch (error) {
+      logger.error("Failed to initialize memory search: %s", String(error));
+    }
+  }
+
+  /**
+   * 从用户消息中提取并存储记忆
+   */
+  async extractMemoryFromMessage(text: string): Promise<void> {
+    if (!this.memorySearch) return;
+
+    try {
+      const memory = await getMemorySearch();
+      const { memoryExtractor } = memory;
+
+      // 设置存储后端
+      memoryExtractor.setStore(this.memorySearch as any);
+
+      // 提取并存储记忆
+      const items = await memoryExtractor.extractAndStore(text);
+      if (items.length > 0) {
+        logger.debug("Extracted %d memories from message", items.length);
+      }
+    } catch (error) {
+      logger.error("Failed to extract memory: %s", String(error));
+    }
+  }
+
+  /**
+   * 检索相关记忆
+   */
+  async searchMemory(query: string, limit: number = 5): Promise<string> {
+    if (!this.memorySearch?.isVectorSearchEnabled()) {
+      return "";
+    }
+
+    try {
+      const results = await this.memorySearch.search(query, { limit });
+      if (results.length === 0) {
+        return "";
+      }
+
+      // 格式化为可读文本
+      const lines = ["## Relevant Memories"];
+      for (const result of results) {
+        const item = result.item;
+        lines.push(`- [${item.type}] ${item.content} (confidence: ${item.confidence.toFixed(2)})`);
+      }
+      return lines.join("\n");
+    } catch (error) {
+      logger.error("Failed to search memory: %s", String(error));
+      return "";
+    }
+  }
 
   /**
    * Builds the context (system prompt + messages) for the agent.
@@ -61,7 +160,7 @@ class ContextBuilder {
       parts.push(bootstrap);
     }
 
-    // Memory context
+    // Memory context (legacy)
     const memory = this.memory.get_memory_context();
     if (memory) {
       parts.push(`# Memory\n\n${memory}`);
