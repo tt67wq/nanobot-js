@@ -189,7 +189,7 @@ gatewayCmd
 
     // 配置并初始化记忆检索系统
     if (config.embedding?.enabled && config.embedding.api_key) {
-      agent.context.setMemorySearch({
+      await agent.context.setMemorySearch({
         apiKey: config.embedding.api_key,
         apiBase: config.embedding.api_base || undefined,
         model: config.embedding.model,
@@ -345,13 +345,9 @@ gatewayCmd
               braveApiKey: config.tools?.web?.search?.api_key,
             });
 
-            // 配置并初始化记忆检索系统
-            if (config.embedding?.enabled && config.embedding.api_key) {
-              await progressAgent.context.setMemorySearch({
-                apiKey: config.embedding.api_key,
-                apiBase: config.embedding.api_base || undefined,
-                model: config.embedding.model,
-              });
+            // 复用主 agent 的 memorySearch（避免重复初始化）
+            if (agent.context.memorySearch) {
+              progressAgent.context.memorySearch = agent.context.memorySearch;
             }
 
             // 构建带上下文的消息内容

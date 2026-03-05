@@ -37,7 +37,8 @@ class ContextBuilder {
   workspace: string;
   memory: IMemoryStore;
   skills: ISkillsLoader;
-  private memorySearch: any = null;
+  // 暴露给外部使用（如 gateway 复用 memorySearch）
+  memorySearch: any = null;
   private embeddingConfig: any = null;
 
   /**
@@ -49,15 +50,20 @@ class ContextBuilder {
       logger.debug("[记忆] 当前 context 已初始化记忆系统，跳过");
       return;
     }
-    
-    // 标记全局已初始化（避免重复加载模块）
-    globalMemorySearchInitialized = true;
-    
+
+    // 如果全局已经初始化过，跳过（避免重复初始化）
+    if (globalMemorySearchInitialized) {
+      logger.debug("[记忆] 全局已初始化，跳过");
+      return;
+    }
+
     this.embeddingConfig = embeddingConfig;
-    
-    // 配置后初始化
+
+    // 配置后初始化（只有在有 apiKey 时才初始化）
     if (embeddingConfig?.apiKey) {
       await this.initializeMemorySearch();
+      // 标记全局已初始化（避免重复加载模块）
+      globalMemorySearchInitialized = true;
     }
   }
 

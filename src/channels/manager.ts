@@ -3,6 +3,7 @@ import type { OutboundMessage } from "../bus/events";
 import type { BaseChannel } from "./base";
 import type { Config } from "../config/schema";
 import { FeishuChannel } from "./feishu";
+import { CliChannel } from "./cli";
 import { Logger } from "../utils/logger";
 
 const logger = new Logger({ module: "CHANNEL" });
@@ -41,6 +42,14 @@ export class ChannelManager {
       } catch (e) {
         logger.warn("Feishu channel not available: %s", String(e));
       }
+    }
+
+    if (this.config.channels?.cli?.enabled) {
+      this.channels.set(
+        "cli",
+        new CliChannel(this.config.channels.cli as Record<string, unknown>, this.bus),
+      );
+      logger.info("CLI channel enabled");
     }
   }
 

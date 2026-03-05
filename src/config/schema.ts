@@ -16,8 +16,17 @@ export const FeishuConfigSchema = z.object({
 
 export type FeishuConfig = z.infer<typeof FeishuConfigSchema>;
 
+// CLI (命令行) configuration
+export const CliConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  // CLI 场景不需要白名单，当前用户就是发送者
+});
+
+export type CliConfig = z.infer<typeof CliConfigSchema>;
+
 export const ChannelsConfigSchema = z.object({
   feishu: FeishuConfigSchema.default(() => FeishuConfigSchema.parse({})),
+  cli: CliConfigSchema.default(() => CliConfigSchema.parse({})),
   // 白名单外的 fallback 消息
   fallback_message: z.string().default("未授权用户访问，请委婉拒绝并说明原因。"),
 });
