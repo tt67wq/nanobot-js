@@ -334,32 +334,16 @@ gatewayCmd
               }
             };
 
-            // 创建带进度回调的 Agent 实例
-            const progressAgent = new AgentLoop(provider, config.workspacePath, {
-              model: config.agents.defaults.model,
-              maxIterations: config.agents.defaults.max_tool_iterations,
-              thinking: config.agents.defaults.thinking,
-              enableProgress: config.agents.defaults.progress_events,
-              onProgress: progressHandler,
-              bus,
-              braveApiKey: config.tools?.web?.search?.api_key,
-            });
-
-            // 复用主 agent 的 memorySearch（避免重复初始化）
-            if (agent.context.memorySearch) {
-              progressAgent.context.memorySearch = agent.context.memorySearch;
-            }
-
             // 构建带上下文的消息内容
             const contextMessage = buildContextMessage(inboundMsg);
 
-            // 调用 AgentLoop 处理消息
+            // 复用主 agent 单例，通过 processDirect options 传入本次进度回调
             // ★ 传入原始消息 content 用于记忆系统，增强后的 contextMessage 用于 LLM
-            const response = await progressAgent.processDirect(
+            const response = await agent.processDirect(
               contextMessage,
               sessionKey,
               inboundMsg.media,
-              { rawContent: inboundMsg.content },
+              { rawContent: inboundMsg.content, onProgress: progressHandler },
             );
 
             // 将响应发布到出站队列

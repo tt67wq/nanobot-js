@@ -173,11 +173,12 @@ export class AgentLoop {
   /**
    * 触发进度事件回调
    */
-  private emitProgress(event: ProgressEvent): void {
+  private emitProgress(event: ProgressEvent, callOnProgress?: (event: ProgressEvent) => void): void {
     if (!this.enableProgress) return;
-    if (this.onProgress) {
+    const handler = callOnProgress ?? this.onProgress;
+    if (handler) {
       try {
-        this.onProgress(event);
+        handler(event);
       } catch (e) {
         logger.warn('Progress callback error: %s', String(e));
       }
@@ -191,10 +192,15 @@ export class AgentLoop {
     options?: {
       /** 原始消息内容，用于记忆系统（当 content 被增强时传递） */
       rawContent?: string;
+      /** 本次调用的进度回调，优先级高于构造时设置的 onProgress */
+      onProgress?: (event: ProgressEvent) => void;
     }
   ): Promise<string> {
     // Update current session key for ClearContextTool
     this.currentSessionKey = sessionKey;
+
+    // 本次调用的 onProgress 优先级高于构造时设置的默认回调，用闭包捕获避免污染实例状态
+    const callOnProgress = options?.onProgress ?? this.onProgress;
     
     // ★ 优先使用原始消息内容进行记忆操作（当 content 被增强时，rawContent 包含真实用户输入）
     const memoryContent = options?.rawContent ?? content;
@@ -262,8 +268,8 @@ export class AgentLoop {
     this.emitProgress({
       type: 'thinking',
       content: content.substring(0, 100),
-      iteration: 0
-    });
+      iteration: 0,
+    }, callOnProgress);
     
     while (iteration < this.maxIterations) {
       iteration++;
@@ -297,8 +303,8 @@ export class AgentLoop {
             type: 'tool_start',
             toolName: toolCall.name,
             toolArgs: toolCall.arguments,
-            iteration
-          });
+            iteration,
+          }, callOnProgress);
           
           const result = await this.tools.execute(
             toolCall.name, 
@@ -311,8 +317,8 @@ export class AgentLoop {
             toolName: toolCall.name,
             toolArgs: toolCall.arguments,
             toolResult: result.substring(0, 500), // 截断以避免过长
-            iteration
-          });
+            iteration,
+          }, callOnProgress);
           
           // Add tool result
           messages.push({
@@ -332,14 +338,14 @@ export class AgentLoop {
     this.emitProgress({
       type: 'complete',
       content: finalContent?.substring(0, 500),
-      iteration
-    });
+      iteration,
+    }, callOnProgress);
     
     // Save session
     session.addMessage("user", content);
     session.addMessage("assistant", finalContent ?? "");
     this.sessions.save(session);
-    
+
     return finalContent ?? "No response";
   }
 }
