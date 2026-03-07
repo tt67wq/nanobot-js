@@ -42,6 +42,8 @@ export interface AgentLoopOptions {
   thinking?: boolean;
   /** 进度回调函数 - 在工具执行时通知外部 */
   onProgress?: (event: ProgressEvent) => void;
+  /** 是否启用进度事件回调，默认 true */
+  enableProgress?: boolean;
   /** 消息总线 - 用于 subagent 通知 */
   bus?: MessageBus;
   /** Brave API Key - 用于 subagent 的 web 搜索 */
@@ -50,7 +52,7 @@ export interface AgentLoopOptions {
 
 export class AgentLoop {
   private tools: ToolRegistry;
-  private context: ContextBuilder;
+  public context: ContextBuilder;
   private sessions: SessionManager;
   private contextCleaner!: ContextCleaner;
   private model: string;
@@ -58,6 +60,7 @@ export class AgentLoop {
   private verbose: boolean = true;
   private currentSessionKey: string = "cli:direct";
   private thinking: boolean = false;
+  private enableProgress: boolean = true;
   private onProgress?: (event: ProgressEvent) => void;
   private subagentManager?: SubagentManager;
   
@@ -76,6 +79,7 @@ export class AgentLoop {
     this.maxIterations = options?.maxIterations ?? 20;
     this.verbose = options?.verbose ?? true;
     this.thinking = options?.thinking ?? false;
+    this.enableProgress = options?.enableProgress ?? true;
     this.onProgress = options?.onProgress;
     
     // 初始化 SubagentManager
@@ -110,6 +114,9 @@ export class AgentLoop {
     
     this.context = new ContextBuilder(workspace, null, skillsLoader);
     logger.debug('SkillsLoader passed to ContextBuilder');
+
+    // 注意：记忆检索系统需要外部调用 setMemorySearch 后才会初始化
+    // 在 commands.ts 中配置
     
     this._registerDefaultTools();
     
@@ -166,10 +173,12 @@ export class AgentLoop {
   /**
    * 触发进度事件回调
    */
-  private emitProgress(event: ProgressEvent): void {
-    if (this.onProgress) {
+  private emitProgress(event: ProgressEvent, callOnProgress?: (event: ProgressEvent) => void): void {
+    if (!this.enableProgress) return;
+    const handler = callOnProgress ?? this.onProgress;
+    if (handler) {
       try {
-        this.onProgress(event);
+        handler(event);
       } catch (e) {
         logger.warn('Progress callback error: %s', String(e));
       }
@@ -177,16 +186,34 @@ export class AgentLoop {
   }
 
   async processDirect(
-    content: string, 
+    content: string,
     sessionKey: string = "cli:direct",
-    media?: string[]
+    media?: string[],
+    options?: {
+      /** 原始消息内容，用于记忆系统（当 content 被增强时传递） */
+      rawContent?: string;
+      /** 本次调用的进度回调，优先级高于构造时设置的 onProgress */
+      onProgress?: (event: ProgressEvent) => void;
+    }
   ): Promise<string> {
     // Update current session key for ClearContextTool
     this.currentSessionKey = sessionKey;
+
+    // 本次调用的 onProgress 优先级高于构造时设置的默认回调，用闭包捕获避免污染实例状态
+    const callOnProgress = options?.onProgress ?? this.onProgress;
+    
+    // ★ 优先使用原始消息内容进行记忆操作（当 content 被增强时，rawContent 包含真实用户输入）
+    const memoryContent = options?.rawContent ?? content;
     
     logger.info('=== processDirect() called ===');
     logger.info('Session: %s, Content: "%s", Media: %s', sessionKey, content.substring(0, 50), media?.length ?? 0);
-    
+
+    // 提取并存储用户消息中的记忆（使用原始消息）
+    await this.context.extractMemoryFromMessage(memoryContent);
+
+    // 检索相关记忆（使用原始消息）
+    const relevantMemory = await this.context.searchMemory(memoryContent);
+
     const session = this.sessions.getOrCreate(sessionKey);
     
     // Build user content with optional image support
@@ -228,7 +255,12 @@ export class AgentLoop {
         content: userContent
       }
     ];
-    
+
+    // 如果有检索到相关记忆，注入到 system prompt 中
+    if (relevantMemory) {
+      messages[0].content = messages[0].content + "\n\n" + relevantMemory;
+    }
+
     let iteration = 0;
     let finalContent: string | null = null;
     
@@ -236,8 +268,8 @@ export class AgentLoop {
     this.emitProgress({
       type: 'thinking',
       content: content.substring(0, 100),
-      iteration: 0
-    });
+      iteration: 0,
+    }, callOnProgress);
     
     while (iteration < this.maxIterations) {
       iteration++;
@@ -271,8 +303,8 @@ export class AgentLoop {
             type: 'tool_start',
             toolName: toolCall.name,
             toolArgs: toolCall.arguments,
-            iteration
-          });
+            iteration,
+          }, callOnProgress);
           
           const result = await this.tools.execute(
             toolCall.name, 
@@ -285,8 +317,8 @@ export class AgentLoop {
             toolName: toolCall.name,
             toolArgs: toolCall.arguments,
             toolResult: result.substring(0, 500), // 截断以避免过长
-            iteration
-          });
+            iteration,
+          }, callOnProgress);
           
           // Add tool result
           messages.push({
@@ -306,14 +338,14 @@ export class AgentLoop {
     this.emitProgress({
       type: 'complete',
       content: finalContent?.substring(0, 500),
-      iteration
-    });
+      iteration,
+    }, callOnProgress);
     
     // Save session
     session.addMessage("user", content);
     session.addMessage("assistant", finalContent ?? "");
     this.sessions.save(session);
-    
+
     return finalContent ?? "No response";
   }
 }

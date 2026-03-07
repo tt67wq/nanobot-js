@@ -20,7 +20,10 @@ export abstract class BaseChannel {
   abstract send(msg: OutboundMessage): Promise<void>;
 
   isAllowed(senderId: string): boolean {
-    const allowList = (this.config.allowFrom as string[]) ?? [];
+    // 支持 camelCase (用户配置) 和 snake_case (loader 转换后) 两种格式
+    const allowList = ((this.config.allowFrom as string[])
+      || (this.config.allow_from as string[])
+      ) ?? [];
 
     if (!allowList.length) {
       return true;
@@ -51,10 +54,20 @@ export abstract class BaseChannel {
   ): Promise<void> {
     this.logger.debug('Received message from %s in %s', senderId, chatId);
     this.logger.debug('Content: %s...', content.substring(0, 100));
-    
+
+    // 检查白名单，不通过时使用 fallback 消息替换
     if (!this.isAllowed(senderId)) {
       this.logger.debug('Sender %s NOT allowed (allowList: %s)', senderId, JSON.stringify(this.config.allowFrom));
-      return;
+
+      // 获取 fallback 消息（支持 channels 级别的配置）
+      const fallbackMessage = (this.config.fallbackMessage as string)
+        || (this.config.fallback_message as string)
+        || "未授权用户访问，请委婉拒绝并说明原因。";
+
+      // 用 fallback 替换原始内容，而不是丢弃
+      content = fallbackMessage;
+      media = undefined;  // 清除媒体文件
+      this.logger.debug('Sender %s not in whitelist, using fallback message', senderId);
     }
 
     const msg: InboundMessage = {

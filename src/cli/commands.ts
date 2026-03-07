@@ -18,7 +18,6 @@ import { HeartbeatService } from "../heartbeat/service";
 import { AnthropicProvider } from "../providers/anthropic";
 import { OpenAIProvider } from "../providers/openai";
 import chalk from "chalk";
-import { Logger, LogLevel, configureLogger } from "../utils/logger";
 
 const VERSION = "0.1.0";
 const LOGO = `
@@ -105,9 +104,19 @@ agentCmd
       model: config.agents.defaults.model,
       maxIterations: config.agents.defaults.max_tool_iterations,
       thinking: config.agents.defaults.thinking,
+      enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
     });
+
+    // 配置并初始化记忆检索系统
+    if (config.embedding?.enabled && config.embedding.api_key) {
+      await agent.context.setMemorySearch({
+        apiKey: config.embedding.api_key,
+        apiBase: config.embedding.api_base || undefined,
+        model: config.embedding.model,
+      });
+    }
 
     // Parse image paths
     const media = options.image 
@@ -146,24 +155,9 @@ const gatewayCmd = program
 gatewayCmd
   .option("-p, --port <port>", "Gateway port", "18790")
   .option("-v, --verbose", "Verbose output")
-.action(async (options) => {
-    // 配置日志文件
-    const logDir = join(getDataDir(), "logs");
-    if (!existsSync(logDir)) {
-      mkdirSync(logDir, { recursive: true });
-    }
-    const logFile = join(logDir, `gateway-${new Date().toISOString().split('T')[0]}.log`);
-    
-    // 设置全局 Logger 配置 - 所有模块的 Logger 都会继承此配置
-    configureLogger({
-      level: options.verbose ? LogLevel.DEBUG : LogLevel.INFO,
-      output: 'both',
-      filePath: logFile,
-    });
-    
+  .action(async (options) => {
     console.log(LOGO);
     console.log(`Starting nanobot gateway on port ${options.port}...\n`);
-    console.log(chalk.gray(`Logs: ${logFile}`));
 
     const config = loadConfig();
     const bus = new MessageBus();
@@ -188,9 +182,19 @@ gatewayCmd
       model: config.agents.defaults.model,
       maxIterations: config.agents.defaults.max_tool_iterations,
       thinking: config.agents.defaults.thinking,
+      enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
     });
+
+    // 配置并初始化记忆检索系统
+    if (config.embedding?.enabled && config.embedding.api_key) {
+      await agent.context.setMemorySearch({
+        apiKey: config.embedding.api_key,
+        apiBase: config.embedding.api_base || undefined,
+        model: config.embedding.model,
+      });
+    }
 
     const cronStorePath = join(getDataDir(), "cron", "jobs.json");
     const cronDir = dirname(cronStorePath);
@@ -330,24 +334,16 @@ gatewayCmd
               }
             };
 
-            // 创建带进度回调的 Agent 实例
-            const progressAgent = new AgentLoop(provider, config.workspacePath, {
-              model: config.agents.defaults.model,
-              maxIterations: config.agents.defaults.max_tool_iterations,
-              thinking: config.agents.defaults.thinking,
-              onProgress: progressHandler,
-              bus,
-              braveApiKey: config.tools?.web?.search?.api_key,
-            });
-
             // 构建带上下文的消息内容
             const contextMessage = buildContextMessage(inboundMsg);
 
-            // 调用 AgentLoop 处理消息
-            const response = await progressAgent.processDirect(
+            // 复用主 agent 单例，通过 processDirect options 传入本次进度回调
+            // ★ 传入原始消息 content 用于记忆系统，增强后的 contextMessage 用于 LLM
+            const response = await agent.processDirect(
               contextMessage,
               sessionKey,
               inboundMsg.media,
+              { rawContent: inboundMsg.content, onProgress: progressHandler },
             );
 
             // 将响应发布到出站队列

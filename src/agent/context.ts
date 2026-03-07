@@ -6,6 +6,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { IMemoryStore, ISkillsLoader, BOOTSTRAP_FILES } from "./types.js";
 import type { Message, ContentPart } from "../providers/base.js";
+import { Logger } from "../utils/logger.js";
+
+// 延迟导入记忆模块，避免循环依赖
+let memorySearchModule: typeof import("./memory/index.js") | null = null;
+
+// 静态标志：全局只初始化一次
+let globalMemorySearchInitialized = false;
+
+async function getMemorySearch() {
+  if (!memorySearchModule) {
+    memorySearchModule = await import("./memory/index.js");
+  }
+  return memorySearchModule;
+}
+
+const logger = new Logger({ module: "ContextBuilder" });
 
 interface MediaContentItem {
   type: string;
@@ -21,6 +37,127 @@ class ContextBuilder {
   workspace: string;
   memory: IMemoryStore;
   skills: ISkillsLoader;
+  // 暴露给外部使用（如 gateway 复用 memorySearch）
+  memorySearch: any = null;
+  private embeddingConfig: any = null;
+
+  /**
+   * 设置记忆检索配置
+   */
+  async setMemorySearch(embeddingConfig: { apiKey: string; apiBase?: string; model?: string } | null): Promise<void> {
+    // 如果当前 context 已经有 memorySearch，说明已经初始化过了
+    if (this.memorySearch) {
+      logger.debug("[记忆] 当前 context 已初始化记忆系统，跳过");
+      return;
+    }
+
+    // 如果全局已经初始化过，跳过（避免重复初始化）
+    if (globalMemorySearchInitialized) {
+      logger.debug("[记忆] 全局已初始化，跳过");
+      return;
+    }
+
+    this.embeddingConfig = embeddingConfig;
+
+    // 配置后初始化（只有在有 apiKey 时才初始化）
+    if (embeddingConfig?.apiKey) {
+      await this.initializeMemorySearch();
+      // 标记全局已初始化（避免重复加载模块）
+      globalMemorySearchInitialized = true;
+    }
+  }
+
+  /**
+   * 初始化记忆检索
+   */
+  async initializeMemorySearch(): Promise<void> {
+    if (!this.embeddingConfig?.apiKey) {
+      logger.debug("Embedding not configured, skipping memory search init");
+      return;
+    }
+
+    try {
+      const memory = await getMemorySearch();
+      const { EmbeddingService, MemorySearch } = memory;
+
+      const embeddingService = EmbeddingService.fromConfig({
+        apiKey: this.embeddingConfig.apiKey,
+        apiBase: this.embeddingConfig.apiBase,
+        model: this.embeddingConfig.model,
+      });
+
+      this.memorySearch = new MemorySearch(this.workspace, embeddingService);
+      await this.memorySearch.initialize();
+      logger.info("[记忆] 记忆检索系统初始化成功 (向量搜索: %s)", 
+        this.memorySearch.isVectorSearchEnabled() ? "启用" : "禁用");
+    } catch (error) {
+      logger.error("Failed to initialize memory search: %s", String(error));
+    }
+  }
+
+  /**
+   * 从用户消息中提取并存储记忆
+   */
+  async extractMemoryFromMessage(text: string): Promise<void> {
+    if (!this.memorySearch) {
+      return;
+    }
+
+    try {
+      const memory = await getMemorySearch();
+      const { memoryExtractor } = memory;
+
+      // 设置存储后端
+      memoryExtractor.setStore(this.memorySearch as any);
+
+      // 提取并存储记忆
+      const items = await memoryExtractor.extractAndStore(text);
+      if (items.length > 0) {
+        logger.info("[记忆] 已保存 %d 条记忆到存储", items.length);
+        for (const item of items) {
+          logger.info("[记忆] - [%s] %s (置信度: %.0f%%)", 
+            item.type, item.content, item.confidence * 100);
+        }
+      }
+    } catch (error) {
+      logger.error("Failed to extract memory: %s", String(error));
+    }
+  }
+
+  /**
+   * 检索相关记忆
+   */
+  async searchMemory(query: string, limit: number = 5): Promise<string> {
+    if (!this.memorySearch?.isVectorSearchEnabled()) {
+      return "";
+    }
+
+    try {
+      const results = await this.memorySearch.search(query, { limit, useVector: true });
+      if (results.length === 0) {
+        logger.debug("[记忆] 未找到相关记忆");
+        return "";
+      }
+
+      logger.info("[记忆] 检索到 %d 条相关记忆:", results.length);
+      for (const result of results) {
+        const item = result.item;
+        logger.info("[记忆] - [%s] %s (相关度: %.0f%%)", 
+          item.type, item.content, result.score * 100);
+      }
+
+      // 格式化为可读文本
+      const lines = ["## Relevant Memories"];
+      for (const result of results) {
+        const item = result.item;
+        lines.push(`- [${item.type}] ${item.content} (confidence: ${item.confidence.toFixed(2)})`);
+      }
+      return lines.join("\n");
+    } catch (error) {
+      logger.error("Failed to search memory: %s", String(error));
+      return "";
+    }
+  }
 
   /**
    * Builds the context (system prompt + messages) for the agent.
@@ -61,7 +198,7 @@ class ContextBuilder {
       parts.push(bootstrap);
     }
 
-    // Memory context
+    // Memory context (legacy)
     const memory = this.memory.get_memory_context();
     if (memory) {
       parts.push(`# Memory\n\n${memory}`);

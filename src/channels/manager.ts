@@ -3,6 +3,7 @@ import type { OutboundMessage } from "../bus/events";
 import type { BaseChannel } from "./base";
 import type { Config } from "../config/schema";
 import { FeishuChannel } from "./feishu";
+import { CliChannel } from "./cli";
 import { Logger } from "../utils/logger";
 
 const logger = new Logger({ module: "CHANNEL" });
@@ -22,7 +23,13 @@ export class ChannelManager {
   private initChannels(): void {
     if (this.config.channels?.feishu?.enabled) {
       try {
-        const feishuConfig = this.config.channels.feishu;
+        // 合并 feishu 配置和 channels 级别配置（如 fallback_message）
+        // 优先使用 feishu 内部的 fallback_message
+        const feishuConfig = {
+          ...this.config.channels.feishu,
+          fallback_message: this.config.channels.feishu.fallback_message
+            || this.config.channels.fallback_message,
+        };
         logger.info(
           "Feishu channel creating, config: %s",
           JSON.stringify(feishuConfig),
@@ -35,6 +42,14 @@ export class ChannelManager {
       } catch (e) {
         logger.warn("Feishu channel not available: %s", String(e));
       }
+    }
+
+    if (this.config.channels?.cli?.enabled) {
+      this.channels.set(
+        "cli",
+        new CliChannel(this.config.channels.cli as Record<string, unknown>, this.bus),
+      );
+      logger.info("CLI channel enabled");
     }
   }
 

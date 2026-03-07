@@ -10,12 +10,25 @@ export const FeishuConfigSchema = z.object({
   app_secret: z.string().default(""),
   bot_user_id: z.string().default(""),
   allow_from: z.array(z.string()).default([]),
+  // 通道级别的 fallback 消息
+  fallback_message: z.string().optional(),
 });
 
 export type FeishuConfig = z.infer<typeof FeishuConfigSchema>;
 
+// CLI (命令行) configuration
+export const CliConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  // CLI 场景不需要白名单，当前用户就是发送者
+});
+
+export type CliConfig = z.infer<typeof CliConfigSchema>;
+
 export const ChannelsConfigSchema = z.object({
   feishu: FeishuConfigSchema.default(() => FeishuConfigSchema.parse({})),
+  cli: CliConfigSchema.default(() => CliConfigSchema.parse({})),
+  // 白名单外的 fallback 消息
+  fallback_message: z.string().default("未授权用户访问，请委婉拒绝并说明原因。"),
 });
 
 export type ChannelsConfig = z.infer<typeof ChannelsConfigSchema>;
@@ -28,6 +41,8 @@ export const AgentDefaultsSchema = z.object({
   max_tool_iterations: z.number().int().default(20),
   // 是否启用 thinking (扩展思考)
   thinking: z.boolean().default(false),
+  // 是否发送进度事件回调
+  progress_events: z.boolean().default(true),
 });
 
 export type AgentDefaults = z.infer<typeof AgentDefaultsSchema>;
@@ -79,6 +94,15 @@ export const WebToolsConfigSchema = z.object({
 
 export type WebToolsConfig = z.infer<typeof WebToolsConfigSchema>;
 
+export const EmbeddingConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  api_key: z.string().default(""),
+  api_base: z.string().nullable().default(null),
+  model: z.string().default("text-embedding-3-small"),
+});
+
+export type EmbeddingConfig = z.infer<typeof EmbeddingConfigSchema>;
+
 export const ToolsConfigSchema = z.object({
   web: WebToolsConfigSchema.default(() => WebToolsConfigSchema.parse({})),
 });
@@ -110,6 +134,7 @@ export const ConfigSchema = z.object({
   agents: AgentsConfigSchema.default(() => AgentsConfigSchema.parse({})),
   channels: ChannelsConfigSchema.default(() => ChannelsConfigSchema.parse({})),
   providers: ProvidersConfigSchema.default(() => ProvidersConfigSchema.parse({})),
+  embedding: EmbeddingConfigSchema.default(() => EmbeddingConfigSchema.parse({})),
   gateway: GatewayConfigSchema.default(() => GatewayConfigSchema.parse({})),
   tools: ToolsConfigSchema.default(() => ToolsConfigSchema.parse({})),
   logger: LoggerConfigSchema.default(() => LoggerConfigSchema.parse({})),
@@ -122,6 +147,7 @@ export class Config {
   public agents: AgentsConfig;
   public channels: ChannelsConfig;
   public providers: ProvidersConfig;
+  public embedding: EmbeddingConfig;
   public gateway: GatewayConfig;
   public tools: ToolsConfig;
   public logger: LoggerConfig;
@@ -131,6 +157,7 @@ export class Config {
     this.agents = parsed.agents;
     this.channels = parsed.channels;
     this.providers = parsed.providers;
+    this.embedding = parsed.embedding;
     this.gateway = parsed.gateway;
     this.tools = parsed.tools;
     this.logger = parsed.logger;
