@@ -133,7 +133,7 @@ class ContextBuilder {
     }
 
     try {
-      const results = await this.memorySearch.search(query, { limit });
+      const results = await this.memorySearch.search(query, { limit, useVector: true });
       if (results.length === 0) {
         logger.debug("[记忆] 未找到相关记忆");
         return "";

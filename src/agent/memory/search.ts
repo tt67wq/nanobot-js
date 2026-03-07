@@ -105,13 +105,10 @@ export class MemorySearch {
 
     let items: MemoryItem[];
 
-    // TODO: 修复 LanceDB + Bun 的兼容性问题后重新启用向量搜索
-    // 当前向量搜索会报错 "Buffer is already detached"
+    // 向量搜索（可能因 Bun + LanceDB 兼容性问题报错，自动回退到文本搜索）
     if (useVector && this.vectorStore?.isInitialized()) {
-      logger.debug("[MemorySearch] Using vector search, query: %s", query);
       try {
         items = await this.vectorStore.search(query, limit * 2);
-        logger.debug("[MemorySearch] Vector search returned %d items", items.length);
       } catch (error) {
         logger.error("Vector search failed, falling back to text search: %s", String(error));
         items = await this.store.search(query, limit * 2);

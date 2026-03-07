@@ -1,10 +1,9 @@
 /**
- * LanceDB 向量存储封装
- * 用于记忆的语义检索
+ * bun:sqlite 向量存储封装
+ * 用于记忆的语义检索，替代 LanceDB 避免 Bun 兼容性问题
  */
 
-import * as vectordb from "vectordb";
-import { makeArrowTable } from "vectordb";
+import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { MemoryItem, MemoryType, MemorySource } from "./types.js";
@@ -13,24 +12,62 @@ import { Logger } from "../../utils/logger.js";
 
 const logger = new Logger({ module: "VectorStore" });
 
-// 表名
-const MEMORY_TABLE = "memories";
+const MAX_MEMORIES = 2000;
+const CLEANUP_BATCH = 100;
 
-// 全局初始化标志，避免重复初始化
-let globalInitialized = false;
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+interface MemoryRow {
+  id: string;
+  type: string;
+  content: string;
+  confidence: number;
+  source: string;
+  importance: number;
+  created_at: string;
+  last_accessed: string;
+  access_count: number;
+  vector: string;
+}
+
+function rowToMemoryItem(row: MemoryRow): MemoryItem {
+  return {
+    id: row.id,
+    type: row.type as MemoryType,
+    content: row.content,
+    confidence: row.confidence,
+    source: row.source as MemorySource,
+    importance: row.importance,
+    created_at: new Date(row.created_at),
+    last_accessed: new Date(row.last_accessed),
+    access_count: row.access_count,
+  };
+}
 
 /**
  * 记忆向量存储
- * 使用 LanceDB 进行语义检索
+ * 使用 bun:sqlite 进行语义检索
  */
 export class VectorStore {
-  private db: vectordb.Connection | null = null;
+  private db: Database | null = null;
   private embeddingService: EmbeddingService;
   private dbPath: string;
+  private dbFilePath: string;
   private initialized = false;
+  private vectorCache: Map<string, number[]> = new Map();
 
   constructor(workspace: string, embeddingService: EmbeddingService) {
-    this.dbPath = join(workspace, "memory", "vectors");
+    this.dbPath = join(workspace, "memory");
+    this.dbFilePath = join(workspace, "memory", "sqlite-vectors.db");
     this.embeddingService = embeddingService;
   }
 
@@ -38,7 +75,6 @@ export class VectorStore {
    * 初始化数据库连接
    */
   async initialize(): Promise<void> {
-    // 如果当前实例已初始化，直接返回
     if (this.initialized) return;
 
     // 确保目录存在
@@ -46,60 +82,38 @@ export class VectorStore {
       mkdirSync(this.dbPath, { recursive: true });
     }
 
-    // 连接数据库
-    this.db = await vectordb.connect(this.dbPath);
+    this.db = new Database(this.dbFilePath);
 
-    // 检查表是否已存在
-    const tables = await this.db.tableNames();
-    const tableExists = tables.includes(MEMORY_TABLE);
+    // WAL 模式提升并发性能
+    this.db.run("PRAGMA journal_mode = WAL");
 
-    if (!tableExists) {
-      // 首次初始化：创建表
-      await this.ensureTable();
-      globalInitialized = true;
+    // 建表和索引
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id            TEXT PRIMARY KEY,
+        type          TEXT NOT NULL,
+        content       TEXT NOT NULL,
+        confidence    REAL NOT NULL,
+        source        TEXT NOT NULL,
+        importance    REAL NOT NULL,
+        created_at    TEXT NOT NULL,
+        last_accessed TEXT NOT NULL,
+        access_count  INTEGER NOT NULL DEFAULT 0,
+        vector        TEXT NOT NULL
+      )
+    `);
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)
+    `);
+
+    // 预热向量缓存
+    const rows = this.db.query("SELECT id, vector FROM memories").all() as { id: string; vector: string }[];
+    for (const row of rows) {
+      this.vectorCache.set(row.id, JSON.parse(row.vector));
     }
 
     this.initialized = true;
-    logger.debug("Vector store initialized at %s", this.dbPath);
-  }
-
-  /**
-   * 确保表存在
-   */
-  private async ensureTable(): Promise<void> {
-    if (!this.db) throw new Error("Database not initialized");
-
-    const tables = await this.db.tableNames();
-    if (!tables.includes(MEMORY_TABLE)) {
-      // 创建表时需要定义 schema，使用正确的 vector 列定义
-      const dimensions = this.embeddingService.getDimensions();
-
-      // 测试 makeArrowTable 是否能正常工作
-      const testData = [
-        {
-          id: "tmp",
-          type: "identity",
-          content: "tmp",
-          confidence: 0,
-          source: "explicit",
-          importance: 0,
-          created_at: new Date().toISOString(),
-          last_accessed: new Date().toISOString(),
-          access_count: 0,
-          vector: Array(dimensions).fill(0),
-        },
-      ];
-
-      logger.debug("Creating table with data: %s", JSON.stringify(testData[0]).substring(0, 100));
-
-      // 直接用 makeArrowTable 创建表
-      const table = await this.db.createTable(MEMORY_TABLE, makeArrowTable(testData));
-
-      // 删除初始化记录
-      await table.delete('id = "tmp"');
-
-      logger.debug("Created memory table with schema");
-    }
+    logger.debug("Vector store initialized at %s (%d cached)", this.dbFilePath, this.vectorCache.size);
   }
 
   /**
@@ -115,28 +129,32 @@ export class VectorStore {
   async add(item: MemoryItem): Promise<void> {
     if (!this.db) throw new Error("Database not initialized");
 
-    // 获取 embedding
+    // 超出上限时触发衰减清理
+    if (this.vectorCache.size >= MAX_MEMORIES) {
+      await this.pruneByDecay(CLEANUP_BATCH);
+    }
+
     const embedding = await this.embeddingService.getEmbedding(item.content);
 
-    // 准备数据
-    const data = [
-      {
-        id: item.id,
-        type: item.type,
-        content: item.content,
-        confidence: item.confidence,
-        source: item.source,
-        importance: item.importance,
-        created_at: item.created_at.toISOString(),
-        last_accessed: item.last_accessed.toISOString(),
-        access_count: item.access_count,
-        vector: embedding,
-      },
-    ];
+    this.db.run(
+      `INSERT OR REPLACE INTO memories
+        (id, type, content, confidence, source, importance, created_at, last_accessed, access_count, vector)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        item.id,
+        item.type,
+        item.content,
+        item.confidence,
+        item.source,
+        item.importance,
+        item.created_at.toISOString(),
+        item.last_accessed.toISOString(),
+        item.access_count,
+        JSON.stringify(embedding),
+      ]
+    );
 
-    // 添加到表
-    const table = await this.db.openTable(MEMORY_TABLE);
-    await table.add(makeArrowTable(data));
+    this.vectorCache.set(item.id, embedding);
     logger.debug("Added memory to vector store: %s", item.id);
   }
 
@@ -147,85 +165,83 @@ export class VectorStore {
     if (!this.db) throw new Error("Database not initialized");
     if (items.length === 0) return;
 
-    // 批量获取 embeddings
-    const embeddings = await this.embeddingService.getEmbeddings(
-      items.map((item) => item.content)
+    const embeddings = await this.embeddingService.getEmbeddings(items.map((item) => item.content));
+
+    const insert = this.db.prepare(
+      `INSERT OR REPLACE INTO memories
+        (id, type, content, confidence, source, importance, created_at, last_accessed, access_count, vector)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    // 准备数据
-    const data = items.map((item, i) => ({
-      id: item.id,
-      type: item.type,
-      content: item.content,
-      confidence: item.confidence,
-      source: item.source,
-      importance: item.importance,
-      created_at: item.created_at.toISOString(),
-      last_accessed: item.last_accessed.toISOString(),
-      access_count: item.access_count,
-      vector: embeddings[i],
-    }));
+    const rows: (string | number)[][] = items.map((item, i) => [
+      item.id,
+      item.type,
+      item.content,
+      item.confidence,
+      item.source,
+      item.importance,
+      item.created_at.toISOString(),
+      item.last_accessed.toISOString(),
+      item.access_count,
+      JSON.stringify(embeddings[i]),
+    ]);
 
-    // 批量添加
-    const table = await this.db.openTable(MEMORY_TABLE);
-    await table.add(makeArrowTable(data));
+    const insertAll = this.db.transaction((rowList: (string | number)[][]) => {
+      for (const row of rowList) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        insert.run(...(row as any[]));
+      }
+    });
+
+    insertAll(rows);
+
+    for (let i = 0; i < items.length; i++) {
+      this.vectorCache.set(items[i].id, embeddings[i]);
+    }
+
     logger.debug("Added %d memories to vector store", items.length);
   }
 
   /**
    * 语义检索记忆
    */
-  async search(query: string, limit: number = 5): Promise<MemoryItem[]> {
-    if (!this.db) {
-      throw new Error("Database not initialized");
+  async search(query: string, limit: number = 5, types?: MemoryType[]): Promise<MemoryItem[]> {
+    if (!this.db) throw new Error("Database not initialized");
+
+    const queryVec = await this.embeddingService.getEmbedding(query);
+
+    // 按 type 过滤时，先从库中取允许的 id 集合
+    let allowedIds: Set<string> | null = null;
+    if (types && types.length > 0) {
+      const placeholders = types.map(() => "?").join(",");
+      const rows = this.db.query(
+        `SELECT id FROM memories WHERE type IN (${placeholders})`
+      ).all(...types) as { id: string }[];
+      allowedIds = new Set(rows.map((r) => r.id));
     }
 
-    // 获取查询的 embedding
-    const embedding = await this.embeddingService.getEmbedding(query);
-
-    // 确保 embedding 是正确的格式
-    if (!embedding || embedding.length === 0) {
-      throw new Error("Empty embedding returned");
+    // 遍历内存缓存计算余弦相似度
+    const scored: Array<{ id: string; score: number }> = [];
+    for (const [id, vec] of this.vectorCache) {
+      if (allowedIds && !allowedIds.has(id)) continue;
+      scored.push({ id, score: cosineSimilarity(queryVec, vec) });
     }
 
-    // 执行向量搜索
-    const table = await this.db.openTable(MEMORY_TABLE);
-    const results = await table
-      .search(embedding)
-      .limit(limit)
-      .execute();
+    scored.sort((a, b) => b.score - a.score);
+    const topIds = scored.slice(0, limit).map((s) => s.id);
 
-    // 转换为 MemoryItem
-    const items: MemoryItem[] = [];
-    for (const row of results as Record<string, unknown>[]) {
-      items.push({
-        id: String(row.id),
-        type: row.type as MemoryType,
-        content: String(row.content),
-        confidence: Number(row.confidence),
-        source: row.source as MemorySource,
-        importance: Number(row.importance),
-        created_at: new Date(String(row.created_at)),
-        last_accessed: new Date(String(row.last_accessed)),
-        access_count: Number(row.access_count),
-      });
-    }
-
-    return items;
+    // 按 id 查完整记录
+    return topIds.map((id) => {
+      const row = this.db!.query("SELECT * FROM memories WHERE id = ?").get(id) as MemoryRow;
+      return rowToMemoryItem(row);
+    });
   }
 
   /**
    * 更新记忆
    */
   async update(item: MemoryItem): Promise<void> {
-    // 每次更新时重新连接
-    const db = await vectordb.connect(this.dbPath);
-    this.db = db;
-
-    // 先删除旧记录
     await this.delete(item.id);
-
-    // 添加新记录
     await this.add(item);
   }
 
@@ -235,8 +251,8 @@ export class VectorStore {
   async delete(id: string): Promise<void> {
     if (!this.db) throw new Error("Database not initialized");
 
-    const table = await this.db.openTable(MEMORY_TABLE);
-    await table.delete(`id = "${id}"`);
+    this.db.run("DELETE FROM memories WHERE id = ?", [id]);
+    this.vectorCache.delete(id);
     logger.debug("Deleted memory from vector store: %s", id);
   }
 
@@ -247,9 +263,16 @@ export class VectorStore {
     if (!this.db) throw new Error("Database not initialized");
     if (ids.length === 0) return;
 
-    const table = await this.db.openTable(MEMORY_TABLE);
+    const del = this.db.prepare("DELETE FROM memories WHERE id = ?");
+    const deleteAll = this.db.transaction((idList: string[]) => {
+      for (const id of idList) {
+        del.run(id);
+      }
+    });
+    deleteAll(ids);
+
     for (const id of ids) {
-      await table.delete(`id = "${id}"`);
+      this.vectorCache.delete(id);
     }
     logger.debug("Deleted %d memories from vector store", ids.length);
   }
@@ -260,29 +283,43 @@ export class VectorStore {
   async count(): Promise<number> {
     if (!this.db) throw new Error("Database not initialized");
 
-    const table = await this.db.openTable(MEMORY_TABLE);
-    // 通过执行空查询获取 ArrowTable，然后获取长度
-    const results = await table.search([0].fill(0)).limit(0).execute();
-    return results.length;
+    const row = this.db.query("SELECT COUNT(*) as count FROM memories").get() as { count: number };
+    return row.count;
   }
 
   /**
-   * 重新构建索引（用于优化搜索性能）
+   * 重新构建索引（空操作，接口保留）
    */
   async rebuildIndex(): Promise<void> {
-    if (!this.db) throw new Error("Database not initialized");
-
-    const table = await this.db.openTable(MEMORY_TABLE);
-    // LanceDB 自动维护索引，此处为保留接口
-    logger.debug("Index rebuild requested (LanceDB handles this automatically)");
+    logger.debug("Index rebuild requested (bun:sqlite handles this automatically)");
   }
 
   /**
    * 关闭数据库连接
    */
   async close(): Promise<void> {
-    this.db = null;
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+    this.vectorCache.clear();
     this.initialized = false;
     logger.debug("Vector store closed");
+  }
+
+  /**
+   * 按衰减分删除最低价值的记忆
+   */
+  private async pruneByDecay(count: number): Promise<void> {
+    if (!this.db) return;
+
+    const rows = this.db.query(
+      `SELECT id FROM memories
+       ORDER BY (importance * confidence / (access_count + 1)) ASC
+       LIMIT ?`
+    ).all(count) as { id: string }[];
+
+    await this.deleteMany(rows.map((r) => r.id));
+    logger.debug("Pruned %d low-value memories", rows.length);
   }
 }

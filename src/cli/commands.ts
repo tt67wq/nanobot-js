@@ -111,7 +111,7 @@ agentCmd
 
     // 配置并初始化记忆检索系统
     if (config.embedding?.enabled && config.embedding.api_key) {
-      agent.context.setMemorySearch({
+      await agent.context.setMemorySearch({
         apiKey: config.embedding.api_key,
         apiBase: config.embedding.api_base || undefined,
         model: config.embedding.model,
