@@ -117,6 +117,7 @@ agentCmd
         apiKey: config.embedding.api_key,
         apiBase: config.embedding.api_base || undefined,
         model: config.embedding.model,
+        timeout: config.embedding.timeout,
       });
     }
 
@@ -138,6 +139,24 @@ agentCmd
         media,
       );
       console.log("\n" + response);
+
+      // 等待 subagent 结果（最多 60 秒）
+      // 检查是否有 subagent 任务在运行
+      const startTime = Date.now();
+      while (Date.now() - startTime < 60000) {
+        if (bus.inboundSize > 0) {
+          const msg = await bus.consumeInbound();
+          if (msg.senderId === 'subagent') {
+            console.log("\n" + "=".repeat(50));
+            console.log(chalk.cyan("[Subagent 完成]"));
+            console.log(msg.content);
+            console.log("=".repeat(50));
+            break;
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       // 等待 MAPLE Learning 完成（最多 15 秒），避免进程退出前异步任务被截断
       if (agent.lastLearningPromise) {
         await Promise.race([
@@ -147,6 +166,28 @@ agentCmd
       }
     } else {
       console.log("Interactive mode (Ctrl+C to exit)\n");
+
+      // 启动 subagent 结果监听器
+      const subagentListener = async () => {
+        while (true) {
+          try {
+            if (bus.inboundSize > 0) {
+              const msg = await bus.consumeInbound();
+              if (msg.senderId === 'subagent') {
+                console.log("\n" + "=".repeat(50));
+                console.log(chalk.cyan("[Subagent 完成]"));
+                console.log(msg.content);
+                console.log("=".repeat(50) + "\n");
+                console.log(chalk.bold.blue("You: ") + "(继续输入，或 Ctrl+C 退出)");
+              }
+            }
+          } catch {
+            // ignore
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      };
+      subagentListener(); // 不 await，后台运行
 
       while (true) {
         try {
@@ -209,6 +250,7 @@ gatewayCmd
         apiKey: config.embedding.api_key,
         apiBase: config.embedding.api_base || undefined,
         model: config.embedding.model,
+        timeout: config.embedding.timeout,
       });
     }
 
@@ -285,12 +327,21 @@ gatewayCmd
               );
               
               // 解析 chatId 格式为 "channel:chatId"
-              const [channel, chatId] = inboundMsg.chatId.split(':');
+              const [originChannel, originChatId] = inboundMsg.chatId.split(':');
               
-              // 发送通知到渠道
+              // 如果 origin 是 gateway（CLI 直接调用），直接打印到控制台
+              if (originChannel === 'gateway') {
+                console.log("\n" + "=".repeat(50));
+                console.log("[Subagent 完成]");
+                console.log(inboundMsg.content);
+                console.log("=".repeat(50) + "\n");
+                continue;
+              }
+              
+              // 否则发送通知到对应渠道（如飞书）
               await bus.publishOutbound({
-                channel: channel || 'feishu',
-                chatId: chatId || inboundMsg.chatId,
+                channel: originChannel || 'feishu',
+                chatId: originChatId || inboundMsg.chatId,
                 content: inboundMsg.content,
                 replyTo: inboundMsg.metadata?.message_id as string | undefined,
                 metadata: inboundMsg.metadata,

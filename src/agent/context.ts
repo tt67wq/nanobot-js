@@ -44,7 +44,7 @@ class ContextBuilder {
   /**
    * 设置记忆检索配置
    */
-  async setMemorySearch(embeddingConfig: { apiKey: string; apiBase?: string; model?: string } | null): Promise<void> {
+  async setMemorySearch(embeddingConfig: { apiKey: string; apiBase?: string; model?: string; timeout?: number } | null): Promise<void> {
     // 如果当前 context 已经有 memorySearch，说明已经初始化过了
     if (this.memorySearch) {
       logger.debug("[记忆] 当前 context 已初始化记忆系统，跳过");
@@ -84,6 +84,7 @@ class ContextBuilder {
         apiKey: this.embeddingConfig.apiKey,
         apiBase: this.embeddingConfig.apiBase,
         model: this.embeddingConfig.model,
+        timeout: this.embeddingConfig.timeout,
       });
 
       this.memorySearch = new MemorySearch(this.workspace, embeddingService);

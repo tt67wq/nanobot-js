@@ -99,6 +99,7 @@ export const EmbeddingConfigSchema = z.object({
   api_key: z.string().default(""),
   api_base: z.string().nullable().default(null),
   model: z.string().default("text-embedding-3-small"),
+  timeout: z.number().int().positive().default(5), // 请求超时（秒）
 });
 
 export type EmbeddingConfig = z.infer<typeof EmbeddingConfigSchema>;

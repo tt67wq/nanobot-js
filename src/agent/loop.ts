@@ -299,6 +299,7 @@ export class AgentLoop {
       });
       
       if (response.toolCalls && response.toolCalls.length > 0) {
+        logger.info('Tool calls: %s', response.toolCalls.map(tc => tc.name).join(', '));
         // Add assistant message with tool calls - 必须包含 tool_calls 字段
         messages.push({
           role: "assistant",
