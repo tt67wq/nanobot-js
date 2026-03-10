@@ -383,3 +383,64 @@ describe("Logger / configureGlobalLogger 全局配置", () => {
     ).not.toThrow();
   });
 });
+
+// ──────────────────────────────────────────────────────────────
+// 场景 4：formatMessage 占位符格式化
+// 回归 bug：多次 replace 导致 argIndex 错位，%.0f 紧跟 %% 时
+// 消耗了错误的 arg，%s 拿到浮点值，浮点数未被 toFixed 处理。
+// ──────────────────────────────────────────────────────────────
+
+describe("Logger / formatMessage 占位符格式化", () => {
+  // 通过 console 捕获间接测试（formatMessage 是私有方法）
+  async function captureLog(
+    format: string,
+    ...args: unknown[]
+  ): Promise<string> {
+    const { Logger, configureGlobalLogger } = await import("../../src/utils/logger.ts");
+    configureGlobalLogger({ level: "debug", format: "pretty", output: "console" });
+
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => lines.push(a.join(" "));
+    new Logger({ module: "FMT" }).info(format, ...args);
+    console.log = orig;
+
+    // pretty format 输出：`\x1b[...]m[FMT:INFO]\x1b[0m message`
+    // 去掉 ANSI 后形如 `[FMT:INFO] message`，取第一个 `] ` 之后的内容
+    const raw = lines[0] ?? "";
+    const plain = raw.replace(/\x1b\[[0-9;]*m/g, "");
+    const sep = plain.indexOf("] ");
+    return sep >= 0 ? plain.slice(sep + 2) : plain;
+  }
+
+  it("%.0f 紧跟 %% 时正确格式化（回归：argIndex 错位 bug）", async () => {
+    // 这是触发原始 bug 的精确调用形式
+    const result = await captureLog(
+      "[%s] %s (相关度: %.0f%%)",
+      "habit",
+      "用户总是: 忘记喝水",
+      37.5,
+    );
+    expect(result).toBe("[habit] 用户总是: 忘记喝水 (相关度: 38%)");
+  });
+
+  it("%.0f 对浮点数正确取整", async () => {
+    const result = await captureLog("score: %.0f%%", 72.00000000000001);
+    expect(result).toBe("score: 72%");
+  });
+
+  it("%% 转义为字面 %", async () => {
+    const result = await captureLog("done 100%%");
+    expect(result).toBe("done 100%");
+  });
+
+  it("%s %d %f 按顺序消耗 args", async () => {
+    const result = await captureLog("%s=%d (%.2f)", "x", 3, 3.14159);
+    expect(result).toBe("x=3 (3.14)");
+  });
+
+  it("args 不足时未消耗的占位符保留原样", async () => {
+    const result = await captureLog("%s and %s", "only-one");
+    expect(result).toBe("only-one and %s");
+  });
+});
