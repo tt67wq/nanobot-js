@@ -333,7 +333,140 @@ bun run src/cli/commands.ts gateway
 | `filesystem` | 文件系统操作 (读/写/删除/编辑) |
 | `spawn` | 启动子进程 |
 | `message` | 发送消息到通道 |
-|| `screenshot` | 屏幕截图 |
+| `screenshot` | 屏幕截图 |
+
+## 🧠 记忆系统
+
+nanobot 采用**三层架构**的记忆系统，支持从对话中自动提取、分类、检索和衰减管理长期记忆。
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       记忆系统三层架构                            │
+├─────────────────────────────────────────────────────────────────┤
+│  第一层：会话记忆 (SessionManager)                                │
+│  ├─ 位置：~/.nanobot/sessions/*.jsonl                           │
+│  ├─ 格式：JSONL (第一行 metadata 头 + 后续消息行)                  │
+│  └─ 作用：短期对话历史存储                                         │
+├─────────────────────────────────────────────────────────────────┤
+│  第二层：结构化记忆 (MemoryStore)                                 │
+│  ├─ 位置：~/.nanobot/workspace/memory/structured/               │
+│  ├─ 格式：JSON + JSONL 混合                                       │
+│  │   ├─ identity.json    (身份信息)                              │
+│  │   ├─ preferences.json  (偏好信息)                             │
+│  │   ├─ habits.json      (习惯信息)                              │
+│  │   └─ events.jsonl     (事件信息)                              │
+│  └─ 作用：长期记忆分类存储                                         │
+├─────────────────────────────────────────────────────────────────┤
+│  第三层：向量检索 (VectorStore)                                   │
+│  ├─ 位置：~/.nanobot/workspace/memory/sqlite-vectors.db         │
+│  ├─ 格式：bun:sqlite + 内存向量缓存                               │
+│  └─ 作用：语义检索 + 自动衰减清理                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 四种记忆类型
+
+| 类型 | 说明 | 示例输入 | 提取结果 |
+|------|------|----------|----------|
+| `identity` | 身份信息 - 用户是谁 | "我叫张三" | "用户名字是 张三" |
+| `preference` | 偏好信息 - 用户喜欢什么 | "我喜欢编程" | "用户喜欢: 编程" |
+| `habit` | 习惯信息 - 用户经常做什么 | "我经常早上跑步" | "用户习惯: 早上跑步" |
+| `event` | 事件信息 - 需要记住的事项 | "提醒我明天开会" | "提醒事项: 明天开会" |
+
+### 记忆提取机制
+
+采用**规则引擎**从用户消息中自动提取记忆，无需 LLM 参与：
+
+```typescript
+// 预定义正则规则 (src/agent/memory/rules.ts)
+const MEMORY_PATTERNS = {
+  identity: [
+    { regex: /我叫(\w+)/, extract: m => `用户名字是 ${m[1]}`, confidence: 0.95 },
+    { regex: /我的名字[叫|是]?(\w+)/, confidence: 0.95 }
+  ],
+  preference: [
+    { regex: /我(?:喜欢|爱|偏好)(.+?)(?:\。|$)/, confidence: 0.9 },
+    { regex: /(?:不|别)喜欢(.+?)(?:\。|$)/, confidence: 0.9 }
+  ],
+  habit: [
+    { regex: /我(?:经常|通常|平时)(.+?)(?:\。|$)/, confidence: 0.8 }
+  ],
+  event: [
+    { regex: /记得(.+?)(?:\。|$)/, confidence: 0.95 },
+    { regex: /提醒我(.+?)(?:\。|$)/, confidence: 0.95 }
+  ]
+}
+```
+
+**优点**：
+- 不依赖 LLM，成本低、速度快
+- 置信度可预测、可控
+- 规则可扩展、可调试
+
+### 向量检索系统
+
+使用 `bun:sqlite` 存储向量，支持语义检索：
+
+```typescript
+// 关键设计点：
+// 1. bun:sqlite 替代 LanceDB，避免 Bun 兼容性问题
+// 2. 向量预热到内存缓存，避免每次查询都从磁盘读取
+// 3. SQLite WAL 模式提升并发性能
+// 4. 余弦相似度计算在内存中进行
+
+const memories = await vectorStore.search("用户喜欢什么", 5);
+// 返回语义最相关的 5 条记忆
+```
+
+### 记忆衰减机制
+
+自动清理低价值记忆，防止无限增长：
+
+```typescript
+// 衰减规则 (src/agent/memory/decay.ts)
+shouldDecay(item: MemoryItem): boolean {
+  // 规则 1：低重要性 + 长时间未访问
+  if (item.importance < 0.3 && daysSinceAccess > 30) return true;
+  
+  // 规则 2：从未访问 + 创建时间久远
+  if (item.access_count === 0 && daysSinceCreated > 90) return true;
+  
+  // 规则 3：极低置信度
+  if (item.confidence < 0.3 && daysSinceCreated > 7) return true;
+  
+  return false;
+}
+```
+
+**触发条件**：向量存储达到上限 2000 条时自动清理，每次最多清理 100 条。
+
+### 数据持久化策略
+
+| 层级 | 存储格式 | 特点 |
+|------|---------|------|
+| 会话层 | JSONL | 无索引，顺序读写，适合追加写入 |
+| 结构化记忆 | JSON + JSONL | JSON 适合小文件随机读写，JSONL 适合追加 |
+| 向量检索 | SQLite | 支持索引、事务、WAL 模式 |
+
+### 目录结构
+
+```
+~/.nanobot/
+├── config.json                          # 全局配置
+├── sessions/                            # 会话记忆
+│   ├── channel_chat-123.jsonl          # 每个会话一个文件
+│   └── ...
+└── workspace/
+    └── memory/
+        ├── structured/                  # 结构化记忆
+        │   ├── identity.json           # 身份信息
+        │   ├── preferences.json        # 偏好信息
+        │   ├── habits.json             # 习惯信息
+        │   └── events.jsonl            # 事件信息
+        └── sqlite-vectors.db           # 向量检索数据库
+```
 
 ## 📁 项目结构
 
