@@ -8,6 +8,8 @@ import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
 import { ContextCleaner } from "../session/cleanup";
+import type { MapleConfig } from "../config/schema";
+import { UserStore, LearningAgent, PersonalizationAgent } from "./maple/index";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Logger } from "../utils/logger";
@@ -63,7 +65,16 @@ export class AgentLoop {
   private enableProgress: boolean = true;
   private onProgress?: (event: ProgressEvent) => void;
   private subagentManager?: SubagentManager;
-  
+  /** MAPLE Learning Agent（会话结束后异步触发） */
+  private learningAgent?: LearningAgent;
+  /** MAPLE Personalization Agent（请求路径，快速） */
+  private personalizationAgent?: PersonalizationAgent;
+  /**
+   * 最近一次 Learning 的 Promise，供 CLI 等待（避免进程退出前异步任务被截断）
+   * Gateway 模式不需要关心此字段（长期运行进程）
+   */
+  public lastLearningPromise?: Promise<void>;
+
   constructor(
     private provider: LLMProvider,
     workspace: string,
@@ -208,6 +219,12 @@ export class AgentLoop {
     logger.info('=== processDirect() called ===');
     logger.info('Session: %s, Content: "%s", Media: %s', sessionKey, content.substring(0, 50), media?.length ?? 0);
 
+    // MAPLE Personalization：读取用户画像，生成注入片段（纯文件 IO，< 10ms）
+    let mapleContext = "";
+    if (this.personalizationAgent) {
+      mapleContext = await this.personalizationAgent.buildContext(sessionKey, memoryContent);
+    }
+
     // 提取并存储用户消息中的记忆（使用原始消息）
     await this.context.extractMemoryFromMessage(memoryContent);
 
@@ -224,7 +241,7 @@ export class AgentLoop {
     const messages: Message[] = [
       {
         role: "system",
-        content: this.context.buildSystemPrompt()
+        content: this.context.buildSystemPrompt(undefined, mapleContext)
       },
       ...session.getHistory()
         .filter(m => {
@@ -346,6 +363,53 @@ export class AgentLoop {
     session.addMessage("assistant", finalContent ?? "");
     this.sessions.save(session);
 
+    // MAPLE Learning：fire-and-forget，不阻塞响应路径
+    // lastLearningPromise 供 CLI 在打印回复后等待，避免进程退出前被截断
+    if (this.learningAgent) {
+      const allMessages = session.getAllMessages();
+      this.lastLearningPromise = this.learningAgent.processSession(sessionKey, allMessages)
+        .catch((e: unknown) => logger.warn('[MAPLE:Learning] fire-and-forget 失败: %s', String(e)));
+    }
+
     return finalContent ?? "No response";
+  }
+
+  /**
+   * 初始化 MAPLE 个性化系统
+   * 
+   * 在 commands.ts 中于 setMemorySearch 之后调用。
+   * 内部创建 UserStore、LearningAgent、PersonalizationAgent。
+   * 
+   * @param mapleConfig  maple 配置节点
+   * @param provider     LLM 提供商（Learning Agent 用于 LLM 深度分析）
+   */
+  initMaple(mapleConfig: MapleConfig, provider: LLMProvider): void {
+    if (!mapleConfig.enabled) {
+      logger.debug('[MAPLE] 未启用 (maple.enabled = false)，跳过初始化');
+      return;
+    }
+
+    const userStore = new UserStore(this.context.workspace);
+
+    if (mapleConfig.personalization.enabled) {
+      this.personalizationAgent = new PersonalizationAgent(userStore);
+      logger.info('[MAPLE] Personalization Agent 已初始化');
+    }
+
+    if (mapleConfig.learning.enabled) {
+      // context.memorySearch 是 any 类型（来自 context.ts），null 表示未配置 embedding
+      // LearningAgent 内部对 null 做了安全处理，会跳过规则层
+      this.learningAgent = new LearningAgent(
+        this.context.memorySearch,
+        provider,
+        userStore,
+        mapleConfig.learning.llm_model,
+        mapleConfig.learning.min_messages,
+        mapleConfig.learning.use_llm,
+      );
+      logger.info('[MAPLE] Learning Agent 已初始化 (LLM 分析: %s)', mapleConfig.learning.use_llm ? '启用' : '禁用');
+    }
+
+    logger.info('[MAPLE] MAPLE 个性化系统初始化完成');
   }
 }

@@ -186,7 +186,7 @@ class ContextBuilder {
    * @param skillNames Optional list of skills to include.
    * @returns Complete system prompt.
    */
-  buildSystemPrompt(skillNames?: string[]): string {
+  buildSystemPrompt(skillNames?: string[], mapleContext?: string): string {
     const parts = [];
 
     // Core identity
@@ -223,6 +223,11 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 ${skillsSummary}`);
+    }
+
+    // MAPLE 用户画像注入（在其他内容之后，避免干扰核心 prompt）
+    if (mapleContext) {
+      parts.push(mapleContext);
     }
 
     return parts.join("\n\n---\n\n");
