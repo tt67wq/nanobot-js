@@ -663,7 +663,6 @@ nanobot/
 ├── Makefile                # 🔨 构建脚本
 ├── VERSION                 # 📌 版本号
 └── package.json
-```
 ├── bin/                 # 编译后的二进制
 ├── Makefile            # 构建脚本
 ├── VERSION             # 版本号
