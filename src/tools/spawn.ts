@@ -8,12 +8,12 @@ interface SpawnOptions {
 
 export class SpawnTool extends Tool {
   name = "spawn";
-  description = "Spawn a subagent to handle a task in the background.";
+  description = "启动一个后台子任务（subagent）。子任务会独立执行，完成后自动通知结果。适用于需要并行处理的任务，如查询信息、执行耗时操作等。";
   parameters = {
     type: "object",
     properties: {
-      task: { type: "string", description: "The task for the subagent to complete" },
-      label: { type: "string", description: "Optional short label for the task" }
+      task: { type: "string", description: "子任务的具体内容描述" },
+      label: { type: "string", description: "可选的任务标签，用于识别任务" }
     },
     required: ["task"]
   };

@@ -18,6 +18,7 @@ export interface EmbeddingConfig {
   apiKey: string;
   apiBase: string;
   model: string;
+  timeout: number; // 请求超时（秒）
 }
 
 /**
@@ -32,6 +33,7 @@ export class EmbeddingService {
       apiKey: config.apiKey || "",
       apiBase: config.apiBase || DEFAULT_EMBEDDING_BASE,
       model: config.model || DEFAULT_EMBEDDING_MODEL,
+      timeout: config.timeout || 5,
     };
   }
 
@@ -39,7 +41,11 @@ export class EmbeddingService {
    * 更新配置
    */
   updateConfig(config: Partial<EmbeddingConfig>): void {
-    this.config = { ...this.config, ...config };
+    this.config = {
+      ...this.config,
+      ...config,
+      timeout: config.timeout ?? this.config.timeout,
+    };
   }
 
   /**
@@ -66,26 +72,34 @@ export class EmbeddingService {
       throw new Error("Embedding service not configured. Please provide API key.");
     }
 
-    const response = await fetch(`${this.config.apiBase}/embeddings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.config.model,
-        input: text,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout * 1000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error("Embedding API error: %s", error);
-      throw new Error(`Embedding API failed: ${response.status}`);
+    try {
+      const response = await fetch(`${this.config.apiBase}/embeddings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          input: text,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        logger.error("Embedding API error: %s", error);
+        throw new Error(`Embedding API failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.data[0].embedding;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = await response.json();
-    return data.data[0].embedding;
   }
 
   /**
@@ -98,32 +112,40 @@ export class EmbeddingService {
       throw new Error("Embedding service not configured. Please provide API key.");
     }
 
-    const response = await fetch(`${this.config.apiBase}/embeddings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.config.model,
-        input: texts,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout * 1000);
 
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error("Embedding API error: %s", error);
-      throw new Error(`Embedding API failed: ${response.status}`);
+    try {
+      const response = await fetch(`${this.config.apiBase}/embeddings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          input: texts,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        logger.error("Embedding API error: %s", error);
+        throw new Error(`Embedding API failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // 按输入顺序返回 embedding
+      const embeddings = new Map<number, number[]>();
+      for (const item of data.data) {
+        embeddings.set(item.index, item.embedding);
+      }
+
+      return texts.map((_, i) => embeddings.get(i) || []);
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = await response.json();
-    // 按输入顺序返回 embedding
-    const embeddings = new Map<number, number[]>();
-    for (const item of data.data) {
-      embeddings.set(item.index, item.embedding);
-    }
-
-    return texts.map((_, i) => embeddings.get(i) || []);
   }
 
   /**
@@ -150,11 +172,13 @@ export class EmbeddingService {
     apiKey?: string;
     apiBase?: string;
     model?: string;
+    timeout?: number;
   }): EmbeddingService {
     return new EmbeddingService({
       apiKey: config.apiKey || "",
       apiBase: config.apiBase || DEFAULT_EMBEDDING_BASE,
       model: config.model || DEFAULT_EMBEDDING_MODEL,
+      timeout: config.timeout || 5,
     });
   }
 }
