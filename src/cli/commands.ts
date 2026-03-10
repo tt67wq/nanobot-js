@@ -118,6 +118,12 @@ agentCmd
       });
     }
 
+    // 初始化 MAPLE 个性化系统
+    if (config.maple?.enabled) {
+      agent.initMaple(config.maple, provider);
+      console.log(chalk.green("✓") + " MAPLE personalization enabled");
+    }
+
     // Parse image paths
     const media = options.image 
       ? options.image.split(',').map((p: string) => p.trim())
@@ -130,6 +136,13 @@ agentCmd
         media,
       );
       console.log("\n" + response);
+      // 等待 MAPLE Learning 完成（最多 15 秒），避免进程退出前异步任务被截断
+      if (agent.lastLearningPromise) {
+        await Promise.race([
+          agent.lastLearningPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, 15000)),
+        ]);
+      }
     } else {
       console.log("Interactive mode (Ctrl+C to exit)\n");
 
@@ -194,6 +207,12 @@ gatewayCmd
         apiBase: config.embedding.api_base || undefined,
         model: config.embedding.model,
       });
+    }
+
+    // 初始化 MAPLE 个性化系统
+    if (config.maple?.enabled) {
+      agent.initMaple(config.maple, provider);
+      console.log(chalk.green("✓") + " MAPLE personalization enabled");
     }
 
     const cronStorePath = join(getDataDir(), "cron", "jobs.json");
@@ -767,6 +786,41 @@ function promptInput(question: string): Promise<string> {
     });
   });
 }
+
+
+
+// ============================================
+// maple 子命令：查看/清除用户画像（调试用）
+// ============================================
+const mapleCmd = program
+  .command("maple")
+  .description("MAPLE personalization profile management");
+
+mapleCmd
+  .command("profile [userId]")
+  .description("View user profile (default: cli:default)")
+  .action(async (userId?: string) => {
+    const config = loadConfig();
+    const { PersonalizationAgent, UserStore } = await import("../agent/maple/index.js");
+    const userStore = new UserStore(config.workspacePath);
+    const personalizationAgent = new PersonalizationAgent(userStore);
+    const targetUserId = userId ?? "cli:default";
+    const summary = await personalizationAgent.getProfileSummary(targetUserId);
+    console.log(summary);
+  });
+
+mapleCmd
+  .command("clear [userId]")
+  .description("Clear user profile (default: cli:default)")
+  .action(async (userId?: string) => {
+    const config = loadConfig();
+    const { UserStore, createDefaultProfile } = await import("../agent/maple/index.js");
+    const userStore = new UserStore(config.workspacePath);
+    const targetUserId = userId ?? "cli:default";
+    const emptyProfile = createDefaultProfile(targetUserId);
+    userStore.save(emptyProfile);
+    console.log(chalk.green("✓") + ` MAPLE profile cleared for: ${targetUserId}`);
+  });
 
 export function runCLI(args: string[]) {
   program.parse(args);

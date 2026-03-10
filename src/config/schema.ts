@@ -130,6 +130,29 @@ export const ContextCleanupConfigSchema = z.object({
 
 export type ContextCleanupConfig = z.infer<typeof ContextCleanupConfigSchema>;
 
+// MAPLE (Memory-Augmented Personalized LLM Engine) 配置
+export const MapleConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  // Learning Agent 配置
+  learning: z.object({
+    enabled: z.boolean().default(true),
+    /** 是否启用 LLM 深度分析（会话结束后异步调用） */
+    use_llm: z.boolean().default(true),
+    /** 使用的模型名，空字符串 = 复用 agent 默认 model */
+    llm_model: z.string().default(""),
+    /** 至少 N 条消息才触发 learning */
+    min_messages: z.number().int().default(3),
+  }).default({}),
+  // Personalization Agent 配置
+  personalization: z.object({
+    enabled: z.boolean().default(true),
+    /** 注入到 system prompt 的最大 token 数（约 300 tokens） */
+    max_tokens: z.number().int().default(300),
+  }).default({}),
+});
+
+export type MapleConfig = z.infer<typeof MapleConfigSchema>;
+
 export const ConfigSchema = z.object({
   agents: AgentsConfigSchema.default(() => AgentsConfigSchema.parse({})),
   channels: ChannelsConfigSchema.default(() => ChannelsConfigSchema.parse({})),
@@ -139,6 +162,7 @@ export const ConfigSchema = z.object({
   tools: ToolsConfigSchema.default(() => ToolsConfigSchema.parse({})),
   logger: LoggerConfigSchema.default(() => LoggerConfigSchema.parse({})),
   context_cleanup: ContextCleanupConfigSchema.default(() => ContextCleanupConfigSchema.parse({})),
+  maple: MapleConfigSchema.default(() => MapleConfigSchema.parse({})),
 });
 
 export type ConfigType = z.infer<typeof ConfigSchema>;
@@ -152,6 +176,7 @@ export class Config {
   public tools: ToolsConfig;
   public logger: LoggerConfig;
   public contextCleanup: ContextCleanupConfig;
+  public maple: MapleConfig;
   constructor(config: Partial<ConfigType> = {}) {
     const parsed = ConfigSchema.parse(config);
     this.agents = parsed.agents;
@@ -162,6 +187,7 @@ export class Config {
     this.tools = parsed.tools;
     this.logger = parsed.logger;
     this.contextCleanup = parsed.context_cleanup;
+    this.maple = parsed.maple;
   }
   // Expands ~ to home directory
   get workspacePath(): string {
