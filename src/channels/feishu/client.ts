@@ -60,9 +60,13 @@ export class FeishuClient {
    * 发送消息
    */
   async sendMessage(chatId: string, content: string): Promise<any> {
+    // Card JSON 2.0 结构，支持表格、标题等完整 Markdown 语法
     const cardContent = JSON.stringify({
+      schema: '2.0',
       config: { wide_screen_mode: true },
-      elements: [{ tag: 'markdown', content }],
+      body: {
+        elements: [{ tag: 'markdown', content }],
+      },
     });
 
     return await this.apiClient.im.message.create({
@@ -79,9 +83,13 @@ export class FeishuClient {
    * 回复消息
    */
   async replyMessage(messageId: string, content: string): Promise<any> {
+    // Card JSON 2.0 结构，支持表格、标题等完整 Markdown 语法
     const cardContent = JSON.stringify({
+      schema: '2.0',
       config: { wide_screen_mode: true },
-      elements: [{ tag: 'markdown', content }],
+      body: {
+        elements: [{ tag: 'markdown', content }],
+      },
     });
 
     return await this.apiClient.im.message.reply({
@@ -94,9 +102,13 @@ export class FeishuClient {
    * 更新消息
    */
   async updateMessage(messageId: string, content: string): Promise<any> {
+    // Card JSON 2.0 结构，支持表格、标题等完整 Markdown 语法
     const cardContent = JSON.stringify({
+      schema: '2.0',
       config: { wide_screen_mode: true },
-      elements: [{ tag: 'markdown', content }],
+      body: {
+        elements: [{ tag: 'markdown', content }],
+      },
     });
 
     return await this.apiClient.im.message.patch({
