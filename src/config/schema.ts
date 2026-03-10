@@ -114,6 +114,9 @@ export const LoggerConfigSchema = z.object({
   level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   format: z.enum(['pretty', 'json']).default('pretty'),
   output: z.enum(['console', 'file', 'both']).default('console'),
+  // 体积轮转配置
+  max_file_size: z.number().int().default(10 * 1024 * 1024), // 10 MB（字节）
+  max_files: z.number().int().default(5),                     // 保留 5 份（含当前）
 });
 
 export type LoggerConfig = z.infer<typeof LoggerConfigSchema>;

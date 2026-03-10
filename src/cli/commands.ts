@@ -17,6 +17,7 @@ import { CronService } from "../cron/service";
 import { HeartbeatService } from "../heartbeat/service";
 import { AnthropicProvider } from "../providers/anthropic";
 import { OpenAIProvider } from "../providers/openai";
+import { configureGlobalLogger } from "../utils/logger";
 import chalk from "chalk";
 
 const VERSION = "0.1.0";
@@ -86,6 +87,7 @@ agentCmd
     console.log(LOGO);
 
     const config = loadConfig();
+    configureGlobalLogger(config.logger);
     const provider = createProvider(config);
 
     if (!provider) {
@@ -173,6 +175,7 @@ gatewayCmd
     console.log(`Starting nanobot gateway on port ${options.port}...\n`);
 
     const config = loadConfig();
+    configureGlobalLogger(config.logger);
     const bus = new MessageBus();
 
     const provider = createProvider(config);

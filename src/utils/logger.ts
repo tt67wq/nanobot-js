@@ -11,6 +11,14 @@
 
 import { homedir } from "os";
 import { join } from "path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+  renameSync,
+  unlinkSync,
+} from "node:fs";
 
 /** Log level enum */
 export enum LogLevel {
@@ -48,6 +56,85 @@ export interface LogEntry {
 
 /** Default log directory */
 const LOG_DIR = join(homedir(), '.nanobot', 'logs');
+
+// ============================================================
+// 全局 Logger 配置 — 通过 configureGlobalLogger() 一次性设置
+// 未调用时保持默认行为（只输出 console，零副作用）
+// ============================================================
+let _globalLevel: LogLevel | null = null;
+let _globalFormat: LogFormat | null = null;
+let _globalOutput: 'console' | 'file' | 'both' | null = null;
+let _globalMaxFileSize: number = 10 * 1024 * 1024; // 10 MB（字节）
+let _globalMaxFiles: number = 5;
+
+// ============================================================
+// 文件写入 & 体积轮转辅助函数
+// ============================================================
+
+/** 确保日志目录存在 */
+function ensureLogDir(): void {
+  if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
+}
+
+/** 当前日志文件路径 */
+function currentLogPath(): string {
+  return join(LOG_DIR, 'nanobot.log');
+}
+
+/** 历史日志路径，index 从 1 开始（nanobot.1.log, nanobot.2.log, …） */
+function rotatedLogPath(index: number): string {
+  return join(LOG_DIR, `nanobot.${index}.log`);
+}
+
+/**
+ * 体积轮转：当 nanobot.log 超过 _globalMaxFileSize 时触发。
+ * 轮转顺序：nanobot.(N-1).log → 删除，…，nanobot.1.log → nanobot.2.log，
+ * nanobot.log → nanobot.1.log，再新建 nanobot.log。
+ */
+function rotateIfNeeded(): void {
+  const current = currentLogPath();
+  if (!existsSync(current)) return;
+
+  try {
+    const { size } = statSync(current);
+    if (size < _globalMaxFileSize) return;
+
+    // 删除最旧的（index = maxFiles - 1）
+    const oldest = rotatedLogPath(_globalMaxFiles - 1);
+    if (existsSync(oldest)) unlinkSync(oldest);
+
+    // 依次向后移：nanobot.3.log → nanobot.4.log, …, nanobot.1.log → nanobot.2.log
+    for (let i = _globalMaxFiles - 2; i >= 1; i--) {
+      const from = rotatedLogPath(i);
+      if (existsSync(from)) renameSync(from, rotatedLogPath(i + 1));
+    }
+
+    // nanobot.log → nanobot.1.log
+    renameSync(current, rotatedLogPath(1));
+  } catch {
+    // 轮转失败不影响写入，下次触发时重试
+  }
+}
+
+/** 剥离 ANSI 颜色转义码 */
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/**
+ * 写入一行到日志文件（同步追加）。
+ * 写入前检查大小并在需要时轮转。写入失败静默忽略，不让 Logger 崩溃。
+ */
+function writeToFile(line: string): void {
+  try {
+    ensureLogDir();
+    rotateIfNeeded();
+    appendFileSync(currentLogPath(), line + '\n', 'utf-8');
+  } catch {
+    // 磁盘满/权限问题时静默 fallback，不崩溃
+  }
+}
 
 /**
  * Logger class with level filtering and format options
@@ -87,7 +174,7 @@ export class Logger {
   }
 
   /** Parse level string to LogLevel */
-  private static parseLevel(level: string): LogLevel {
+  public static parseLevel(level: string): LogLevel {
     const m: Record<string, LogLevel> = {
       'debug': LogLevel.DEBUG,
       'info': LogLevel.INFO,
@@ -121,7 +208,7 @@ export class Logger {
 
   /** Check if level should be logged */
   private shouldLog(level: LogLevel): boolean {
-    return level >= this.level;
+    return level >= (_globalLevel ?? this.level);
   }
 
   /** Safe stringify for objects */
@@ -209,39 +296,56 @@ export class Logger {
     return entry;
   }
 
-  /** Output to console or file */
+  /** Output to console and/or file */
   private outputLog(entry: LogEntry): void {
-    // Logger self-protection: prevent infinite recursion
+    // 自我保护：防止无限递归
     if (entry.module === 'APP:UTILS' && entry.message.includes('Logger')) {
       console.error('[Logger] Error in Logger itself:', entry.error?.message);
       return;
     }
 
-    if (this.format === 'json') {
-      const line = JSON.stringify(entry);
-      if (this.output === 'console' || this.output === 'both') {
-        console.log(line);
-      }
+    // 优先使用全局配置，未设置时退回到实例配置
+    const output = _globalOutput ?? this.output;
+    const format = _globalFormat ?? this.format;
+
+    let consoleLine: string;
+    let fileLine: string;
+
+    if (format === 'json') {
+      consoleLine = JSON.stringify(entry);
+      fileLine = consoleLine; // JSON 本身无 ANSI 颜色
     } else {
       // Pretty format
-      const prefix = `[${entry.module}:${entry.level}]`;
-      const levelMap: Record<string, LogLevel> = { DEBUG: LogLevel.DEBUG, INFO: LogLevel.INFO, WARN: LogLevel.WARN, ERROR: LogLevel.ERROR };
+      const levelMap: Record<string, LogLevel> = {
+        DEBUG: LogLevel.DEBUG,
+        INFO: LogLevel.INFO,
+        WARN: LogLevel.WARN,
+        ERROR: LogLevel.ERROR,
+      };
       const color = this.getColor(levelMap[entry.level] ?? LogLevel.INFO);
-      const message = entry.error 
+      const message = entry.error
         ? `${entry.message}\n  Error: ${entry.error.message}\n  Stack: ${entry.error.stack}`
         : entry.message;
-      
-      const line = `${color}${prefix}${this.resetColor()} ${message}`;
-      
-      if (this.output === 'console' || this.output === 'both') {
-        if (entry.level === 'ERROR') {
-          console.error(line);
-        } else if (entry.level === 'WARN') {
-          console.warn(line);
-        } else {
-          console.log(line);
-        }
+
+      consoleLine = `${color}[${entry.module}:${entry.level}]${this.resetColor()} ${message}`;
+      // 文件中去掉 ANSI 颜色码，保留纯文本
+      fileLine = stripAnsi(consoleLine);
+    }
+
+    // Console 输出
+    if (output === 'console' || output === 'both') {
+      if (entry.level === 'ERROR') {
+        console.error(consoleLine);
+      } else if (entry.level === 'WARN') {
+        console.warn(consoleLine);
+      } else {
+        console.log(consoleLine);
       }
+    }
+
+    // 文件输出（同步追加，含体积轮转）
+    if (output === 'file' || output === 'both') {
+      writeToFile(fileLine);
     }
   }
 
@@ -325,3 +429,25 @@ console.info = (...args: unknown[]) => logger.info(...args);
 console.warn = (...args: unknown[]) => logger.warn(...args);
 console.error = (...args: unknown[]) => logger.error(...args);
 */
+
+/**
+ * 全局配置所有 Logger 实例的输出行为。
+ * 应在应用启动时调用一次（例如 CLI 命令 action 开头）。
+ * 调用后，所有通过 `new Logger()` 或 `createLogger()` 创建的实例
+ * 都会共享此配置，无需单独传参。
+ *
+ * @param config - 来自配置文件的 logger 配置
+ */
+export function configureGlobalLogger(config: {
+  level: string;
+  format: LogFormat;
+  output: 'console' | 'file' | 'both';
+  max_file_size?: number;
+  max_files?: number;
+}): void {
+  _globalLevel = Logger.parseLevel(config.level);
+  _globalFormat = config.format;
+  _globalOutput = config.output;
+  if (config.max_file_size != null) _globalMaxFileSize = config.max_file_size;
+  if (config.max_files != null) _globalMaxFiles = config.max_files;
+}
