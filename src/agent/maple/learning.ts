@@ -171,6 +171,9 @@ export class LearningAgent {
         // 不传 tools，纯文本对话
       });
 
+      // 打印 LLM 原始返回，便于调试 JSON 解析问题
+      logger.debug("[MAPLE:Learning] LLM 原始响应 (前 500 字): %s", response.content?.slice(0, 500) ?? "(空)");
+
       if (!response.content) {
         logger.debug("[MAPLE:Learning] LLM 返回空内容");
         return [];
