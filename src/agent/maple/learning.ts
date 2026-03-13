@@ -103,12 +103,16 @@ export class LearningAgent {
 
       logger.info("[MAPLE:Learning] 开始处理会话，用户: %s，消息数: %d", userId, messages.length);
 
+      console.log('[DEBUG Maple] extractWithRules 前');
       // 规则层：提取结构化记忆（快速，无 LLM 调用）
       await this.extractWithRules(messages);
+      console.log('[DEBUG Maple] extractWithRules 后');
 
       // LLM 层：深度分析（慢，需要 LLM 调用）
       if (this.useLlm) {
+        console.log('[DEBUG Maple] analyzeWithLlm 前');
         const insights = await this.analyzeWithLlm(userId, messages);
+        console.log('[DEBUG Maple] analyzeWithLlm 后');
         if (insights.length > 0) {
           this.persistInsights(userId, insights, messages.length);
         }
@@ -129,6 +133,7 @@ export class LearningAgent {
       logger.info("[MAPLE:Learning] 会话处理完成，用户: %s", userId);
     } catch (e) {
       // 确保不抛出：任何错误只打 warn
+      console.log('[DEBUG Maple] 错误:', String(e));
       logger.warn("[MAPLE:Learning] 处理失败 %s: %s", userId, String(e));
     }
   }
