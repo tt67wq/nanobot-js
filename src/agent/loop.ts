@@ -264,30 +264,22 @@ export class AgentLoop {
           return true;
         })
         .map(m => {
-          // 保留所有角色类型，特别是 tool 角色的 toolCallId 和 toolName
           const msg: Message = {
             role: m.role as "user" | "assistant" | "system" | "tool",
             content: m.content,
           };
-          console.log('[DEBUG map] processing role:', m.role, 'has toolCalls:', !!(m as any).toolCalls);
-          // 保留 tool 消息的关键字段
-          if (m.role === "tool") {
-            if (m.toolCallId) msg.toolCallId = m.toolCallId;
-            if (m.toolName) msg.toolName = m.toolName;
-            logger.debug('[DEBUG] Tool message: role=%s, toolCallId=%s, toolName=%s', msg.role, msg.toolCallId, msg.toolName);
+          // tool 消息保留 toolCallId
+          if (m.role === "tool" && m.toolCallId) {
+            msg.toolCallId = m.toolCallId;
+            msg.toolName = (m as any).toolName;
           }
-          // 保留 assistant 消息的 toolCalls
+          // assistant 消息保留 tool_calls
           if (m.role === "assistant" && (m as any).toolCalls) {
-            console.log('[DEBUG map] assistant has toolCalls, converting...');
             msg.tool_calls = (m as any).toolCalls.map((tc: any) => ({
               id: tc.id,
               type: "function",
-              function: {
-                name: tc.name,
-                arguments: JSON.stringify(tc.arguments)
-              }
+              function: { name: tc.name, arguments: JSON.stringify(tc.arguments) }
             }));
-            logger.debug('[DEBUG] Assistant message with tool_calls: %s', JSON.stringify(msg.tool_calls));
           }
           return msg;
         }),
@@ -387,21 +379,15 @@ export class AgentLoop {
     session.addMessage("user", content);
     session.addMessage("assistant", finalContent ?? "");
     
-    // 保存 tool 消息（如果有的话）
-    // messages 数组从第 2 条开始是历史消息（第 0 条是 system）
+    // 保存 tool 消息和 assistant 的 tool_calls
     const historyMessages = messages.slice(1);
-    console.log('[DEBUG saveSession] messages to save:', historyMessages.map(m => ({role: m.role, hasToolCalls: !!(m as any).tool_calls, hasToolCallId: !!(m as any).toolCallId})));
-    
     for (const msg of historyMessages) {
-      console.log('[DEBUG saveSession] processing:', msg.role, 'tool_calls:', !!(msg as any).tool_calls, 'toolCallId:', !!(msg as any).toolCallId);
-      if (msg.role === "tool" && msg.toolCallId) {
-        console.log('[DEBUG saveSession] saving tool message with toolCallId:', msg.toolCallId);
+      if (msg.role === "tool" && (msg as any).toolCallId) {
         session.addMessage("tool", msg.content as string, {
-          toolCallId: msg.toolCallId,
-          toolName: msg.toolName
+          toolCallId: (msg as any).toolCallId,
+          toolName: (msg as any).toolName
         });
       } else if (msg.role === "assistant" && (msg as any).tool_calls) {
-        console.log('[DEBUG saveSession] saving assistant with tool_calls:', JSON.stringify((msg as any).tool_calls));
         session.addMessage("assistant", msg.content as string, {
           toolCalls: (msg as any).tool_calls?.map((tc: any) => ({
             id: tc.id,

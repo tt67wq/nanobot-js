@@ -6,9 +6,6 @@
 
 import type { ChatOptions, LLMResponse, Tool, ToolDefinition, ToolCallRequest } from "./base";
 import { LLMProvider } from "./base";
-import { Logger } from "../utils/logger";
-
-const logger = new Logger({ module: "AnthropicProvider" });
 
 /**
  * Anthropic API endpoint
@@ -215,95 +212,42 @@ export class AnthropicProvider extends LLMProvider {
   private _convertMessages(messages: ChatOptions["messages"]): AnthropicMessage[] {
     const anthropicMessages: AnthropicMessage[] = [];
 
-    logger.debug('[DEBUG] _convertMessages received %d messages', messages.length);
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      logger.debug('[DEBUG] Message %d: role=%s, hasToolCallId=%s, hasToolCalls=%s', 
-        i, msg.role, !!msg.toolCallId, !!(msg as any).toolCalls?.length);
-    }
-
+    // Handle tool result (OpenAI format: role=tool → Anthropic format: role=user with tool_result)
     for (const msg of messages) {
       const role = msg.role;
       const content = msg.content;
-      // Handle tool calls in message (from OpenAI format)
-      const toolCalls = (msg as { toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }).toolCalls;
+      const toolCalls = (msg as any).toolCalls;
 
-      // Handle tool result (OpenAI format: role=tool → Anthropic format: role=user with tool_result)
       if (role === "tool" && msg.toolCallId) {
-        logger.debug('[DEBUG] Converting tool message: toolCallId=%s, toolName=%s', msg.toolCallId, msg.toolName);
         anthropicMessages.push({
           role: "user",
           content: [
-            {
-              type: "tool_result",
-              tool_use_id: msg.toolCallId,
-              content: content || "",
-            } as AnthropicToolResultBlock,
+            { type: "tool_result", tool_use_id: msg.toolCallId, content: content || "" } as AnthropicToolResultBlock,
           ],
         });
-      }
-      // Handle tool_calls: convert OpenAI format to Anthropic tool_use blocks
-      else if (toolCalls && toolCalls.length > 0) {
+      } else if (toolCalls && toolCalls.length > 0) {
+        // tool_use blocks
         const contentBlocks: AnthropicContentBlock[] = [];
-
-        // Add text content if present
-        if (content) {
-          contentBlocks.push({
-            type: "text",
-            text: content,
-          } as AnthropicTextBlock);
-        }
-
-        // Add tool_use blocks for each tool call
+        if (content) contentBlocks.push({ type: "text", text: content } as AnthropicTextBlock);
         for (const tc of toolCalls) {
-          contentBlocks.push({
-            type: "tool_use",
-            id: tc.id,
-            name: tc.name,
-            input: tc.arguments,
-          } as AnthropicToolUseBlock);
+          contentBlocks.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.arguments } as AnthropicToolUseBlock);
         }
-
-        anthropicMessages.push({
-          role: (role === "system" ? "user" : role) as "user" | "assistant",
-          content: contentBlocks,
-        });
-      }
-      else if (typeof content === "string") {
-        anthropicMessages.push({
-          role: (role === "system" ? "user" : role) as "user" | "assistant",
-          content: [
-            {
-              type: "text",
-              text: content,
-            } as AnthropicTextBlock,
-          ],
-        });
-      }
-      else if (Array.isArray(content)) {
-        // Handle ContentPart[] - for image support
+        anthropicMessages.push({ role: (role === "system" ? "user" : role) as "user" | "assistant", content: contentBlocks });
+      } else if (typeof content === "string") {
+        anthropicMessages.push({ role: (role === "system" ? "user" : role) as "user" | "assistant", content: [{ type: "text", text: content } as AnthropicTextBlock] });
+      } else if (Array.isArray(content)) {
+        // image support
         const blocks: AnthropicContentBlock[] = [];
         for (const part of content) {
-          if (part.type === "text") {
-            blocks.push({ type: "text", text: part.text } as AnthropicTextBlock);
-          } else if (part.type === "image_url") {
+          if (part.type === "text") blocks.push({ type: "text", text: part.text } as AnthropicTextBlock);
+          else if (part.type === "image_url") {
             try {
               const { media_type, data } = this._parseDataUrl(part.image_url.url);
-              blocks.push({
-                type: "image",
-                source: { type: "base64", media_type, data }
-              } as AnthropicImageBlock);
-            } catch {
-              // Skip invalid image URLs
-            }
+              blocks.push({ type: "image", source: { type: "base64", media_type, data } } as AnthropicImageBlock);
+            } catch { /* skip */ }
           }
         }
-        if (blocks.length > 0) {
-          anthropicMessages.push({
-            role: (role === "system" ? "user" : role) as "user" | "assistant",
-            content: blocks,
-          });
-        }
+        if (blocks.length > 0) anthropicMessages.push({ role: (role === "system" ? "user" : role) as "user" | "assistant", content: blocks });
       }
     }
 

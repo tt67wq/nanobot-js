@@ -59,14 +59,9 @@ export class Session {
    * @returns Array of messages in LLM format
    */
   getHistory(maxMessages: number = 50): LLMMessage[] {
-    console.log('[DEBUG getHistory] this.messages count:', this.messages.length);
-    
     const recent = this.messages.length > maxMessages
       ? this.messages.slice(-maxMessages)
       : this.messages;
-
-    console.log('[DEBUG getHistory] recent messages count:', recent.length);
-    console.log('[DEBUG getHistory] recent messages:', JSON.stringify(recent.map(m => ({role: m.role, hasToolCalls: !!m.toolCalls, hasToolCallId: !!m.toolCallId}))));
 
     // Convert to LLM format, preserving tool role and metadata
     return recent.map((m) => {
@@ -74,18 +69,12 @@ export class Session {
         role: m.role as "user" | "assistant" | "system" | "tool",
         content: m.content,
       };
-      // Preserve tool call information for tool responses
       if (m.role === "tool") {
         if (m.toolCallId) msg.toolCallId = m.toolCallId;
         const toolName = (m as { toolName?: string }).toolName;
         if (toolName) msg.toolName = toolName;
       }
-      // Preserve tool calls for assistant messages
-      if (m.toolCalls) {
-        msg.toolCalls = m.toolCalls;
-        // DEBUG
-        console.log(`[DEBUG getHistory] assistant message has toolCalls:`, JSON.stringify(m.toolCalls));
-      }
+      if (m.toolCalls) msg.toolCalls = m.toolCalls;
       return msg;
     });
   }
