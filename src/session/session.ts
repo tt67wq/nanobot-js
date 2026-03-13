@@ -57,12 +57,22 @@ export class Session {
       ? this.messages.slice(-maxMessages)
       : this.messages;
 
-    // Convert to LLM format (role + content only)
-    return recent.map((m) => ({
-      role: m.role as "user" | "assistant" | "system",
-      content: m.content,
-      ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
-    }));
+    // Convert to LLM format, preserving tool role and metadata
+    return recent.map((m) => {
+      const msg: LLMMessage = {
+        role: m.role as "user" | "assistant" | "system" | "tool",
+        content: m.content,
+      };
+      // Preserve tool call information for tool responses
+      if (m.role === "tool") {
+        if (m.toolCallId) msg.toolCallId = m.toolCallId;
+        const toolName = (m as { toolName?: string }).toolName;
+        if (toolName) msg.toolName = toolName;
+      }
+      // Preserve tool calls for assistant messages
+      if (m.toolCalls) msg.toolCalls = m.toolCalls;
+      return msg;
+    });
   }
 
   clear(): void {
