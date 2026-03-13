@@ -52,13 +52,21 @@ export class Session {
    * @param maxMessages - Maximum messages to return (default 50)
    * @returns Array of messages in LLM format
    */
+  /**
+   * Get message history for LLM context.
+   * 
+   * @param maxMessages - Maximum messages to return (default 50)
+   * @returns Array of messages in LLM format
+   */
   getHistory(maxMessages: number = 50): LLMMessage[] {
+    console.log('[DEBUG getHistory] this.messages count:', this.messages.length);
+    
     const recent = this.messages.length > maxMessages
       ? this.messages.slice(-maxMessages)
       : this.messages;
 
-    console.log('[DEBUG getHistory] raw messages count:', recent.length);
-    console.log('[DEBUG getHistory] raw messages:', JSON.stringify(recent.map(m => ({role: m.role, hasToolCalls: !!m.toolCalls, hasToolCallId: !!m.toolCallId}))));
+    console.log('[DEBUG getHistory] recent messages count:', recent.length);
+    console.log('[DEBUG getHistory] recent messages:', JSON.stringify(recent.map(m => ({role: m.role, hasToolCalls: !!m.toolCalls, hasToolCallId: !!m.toolCallId}))));
 
     // Convert to LLM format, preserving tool role and metadata
     return recent.map((m) => {
