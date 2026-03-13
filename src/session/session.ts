@@ -57,6 +57,9 @@ export class Session {
       ? this.messages.slice(-maxMessages)
       : this.messages;
 
+    console.log('[DEBUG getHistory] raw messages count:', recent.length);
+    console.log('[DEBUG getHistory] raw messages:', JSON.stringify(recent.map(m => ({role: m.role, hasToolCalls: !!m.toolCalls, hasToolCallId: !!m.toolCallId}))));
+
     // Convert to LLM format, preserving tool role and metadata
     return recent.map((m) => {
       const msg: LLMMessage = {
