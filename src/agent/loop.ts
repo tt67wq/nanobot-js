@@ -381,9 +381,32 @@ export class AgentLoop {
       iteration,
     }, callOnProgress);
     
-    // Save session
+    // Save session - 保存所有消息，包括 tool 消息
     session.addMessage("user", content);
     session.addMessage("assistant", finalContent ?? "");
+    
+    // 保存 tool 消息（如果有的话）
+    // messages 数组从第 2 条开始是历史消息（第 0 条是 system）
+    const historyMessages = messages.slice(1);
+    for (const msg of historyMessages) {
+      if (msg.role === "tool" && msg.toolCallId) {
+        session.addMessage("tool", msg.content as string, {
+          toolCallId: msg.toolCallId,
+          toolName: msg.toolName
+        });
+      } else if (msg.role === "assistant" && msg.tool_calls) {
+        session.addMessage("assistant", msg.content as string, {
+          toolCalls: msg.tool_calls?.map(tc => ({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: typeof tc.function.arguments === 'string' 
+              ? JSON.parse(tc.function.arguments) 
+              : tc.function.arguments
+          }))
+        });
+      }
+    }
+    
     this.sessions.save(session);
 
     // MAPLE Learning：fire-and-forget，不阻塞响应路径
