@@ -8,7 +8,7 @@ import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
 import { ContextCleaner } from "../session/cleanup";
-import type { MapleConfig } from "../config/schema";
+import type { MapleConfig, ContextCleanupConfig } from "../config/schema";
 import { UserStore, LearningAgent, PersonalizationAgent } from "./maple/index";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -44,12 +44,14 @@ export interface AgentLoopOptions {
   thinking?: boolean;
   /** 进度回调函数 - 在工具执行时通知外部 */
   onProgress?: (event: ProgressEvent) => void;
-  /** 是否启用进度事件回调，默认 true */
+  /** 是否启用进度回调，默认 true */
   enableProgress?: boolean;
   /** 消息总线 - 用于 subagent 通知 */
   bus?: MessageBus;
   /** Brave API Key - 用于 subagent 的 web 搜索 */
   braveApiKey?: string;
+  /** Context cleanup 配置 - 透传用户配置 */
+  contextCleanupConfig?: ContextCleanupConfig;
 }
 
 export class AgentLoop {
@@ -129,23 +131,27 @@ export class AgentLoop {
     // 注意：记忆检索系统需要外部调用 setMemorySearch 后才会初始化
     // 在 commands.ts 中配置
     
-    this._registerDefaultTools();
+    this._registerDefaultTools(options?.contextCleanupConfig);
     
     logger.debug('Created successfully');
     logger.debug('Max iterations: %d', this.maxIterations);
     logger.debug('Thinking enabled: %s', this.thinking);
   }
 
-  private _registerDefaultTools(): void {
-    // Create context cleaner with default config
-    this.contextCleaner = new ContextCleaner({
-      enabled: true,
-      max_tokens: 100000,
-      max_messages: 100,
-      keep_recent: 20,
-      mode: 'smart',
-      compress_model: this.model,
-    }, this.provider, null);
+  private _registerDefaultTools(contextCleanupConfig?: ContextCleanupConfig): void {
+    // 使用传入的配置，缺少字段时用默认值
+    const cleanerConfig = {
+      enabled: contextCleanupConfig?.enabled ?? true,
+      max_tokens: contextCleanupConfig?.max_tokens ?? 100000,
+      max_messages: contextCleanupConfig?.max_messages ?? 100,
+      keep_recent: contextCleanupConfig?.keep_recent ?? 20,
+      mode: contextCleanupConfig?.mode ?? 'smart',
+      compress_model: contextCleanupConfig?.compress_model ?? this.model,
+    };
+    
+    logger.debug('[ContextCleaner] Using config: %s', JSON.stringify(cleanerConfig));
+    
+    this.contextCleaner = new ContextCleaner(cleanerConfig, this.provider, null);
     
     // Register ClearContextTool with callback to get current session
     this.tools.register(new ClearContextTool(

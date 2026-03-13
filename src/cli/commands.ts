@@ -109,6 +109,7 @@ agentCmd
       enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
+      contextCleanupConfig: config.contextCleanup,
     });
 
     // 配置并初始化记忆检索系统
@@ -242,6 +243,7 @@ gatewayCmd
       enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
+      contextCleanupConfig: config.contextCleanup,
     });
 
     // 配置并初始化记忆检索系统
