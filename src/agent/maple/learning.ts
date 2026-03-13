@@ -29,10 +29,27 @@ interface LlmInsightRaw {
 }
 
 /**
+ * LLM 记忆提取返回的单条记忆结构
+ */
+interface LlmMemoryRaw {
+  type: "identity" | "preference" | "habit" | "event";
+  content: string;
+  confidence: number;
+  source: "explicit" | "inferred";
+}
+
+/**
  * LLM 分析结果
  */
 interface LlmAnalysisResult {
   insights: LlmInsightRaw[];
+}
+
+/**
+ * LLM 记忆提取结果
+ */
+interface LlmMemoryResult {
+  memories: LlmMemoryRaw[];
 }
 
 export class LearningAgent {
@@ -95,6 +112,9 @@ export class LearningAgent {
         if (insights.length > 0) {
           this.persistInsights(userId, insights, messages.length);
         }
+
+        // LLM 层：结构化记忆提取（新增）
+        await this.extractMemoryWithLlm(messages);
       }
 
       // 更新 sessionCount 和 lastActiveAt
@@ -145,6 +165,165 @@ export class LearningAgent {
       }
     } catch (e) {
       logger.warn("[MAPLE:Learning] 规则层提取失败: %s", String(e));
+    }
+  }
+
+  /**
+   * LLM 层：用 LLM 从会话中提取结构化记忆（异步，非阻塞）
+   * 
+   * 与规则层的区别：
+   * - 规则层只能识别显式表达（"我叫/我喜欢/记得"）
+   * - LLM 能推断隐式偏好（从对话中推断用户兴趣/习惯）
+   */
+  private async extractMemoryWithLlm(messages: SessionMessage[]): Promise<void> {
+    if (!this.memorySearch) {
+      return;
+    }
+
+    // 取最近 N 条用户消息（避免 token 过多）
+    const userMessages = messages
+      .filter((m) => m.role === "user")
+      .slice(-15)
+      .map((m, i) => `[${i + 1}] ${typeof m.content === "string" ? m.content.slice(0, 300) : ""}`);
+
+    if (userMessages.length === 0) {
+      return;
+    }
+
+    const prompt = this.buildMemoryExtractionPrompt(userMessages.join("\n"));
+
+    try {
+      logger.debug("[MAPLE:Learning] 调用 LLM 提取记忆，模型: %s", this.model);
+
+      const response = await this.provider.chat({
+        messages: [{ role: "user", content: prompt }],
+        model: this.model,
+      });
+
+      if (!response.content) {
+        logger.debug("[MAPLE:Learning] LLM 返回空内容");
+        return;
+      }
+
+      const result = this.parseMemoryResponse(response.content);
+
+      if (result.memories.length === 0) {
+        return;
+      }
+
+      // 动态导入 createMemoryItem
+      const memoryModule = await import("../memory/types.js");
+      const { createMemoryItem } = memoryModule;
+
+      const added: string[] = [];
+
+      for (const m of result.memories) {
+        // 低置信度过滤（低于 0.6 不要包含）
+        if (m.confidence < 0.6) continue;
+
+        // 去重：与已有记忆内容相似则跳过
+        const existing = await (this.memorySearch as { search: (query: string, limit: number) => Promise<{ item: unknown }[]> }).search(m.content, 1);
+        if (existing.length > 0) continue;
+
+        const item = createMemoryItem({
+          type: m.type,
+          content: m.content,
+          confidence: m.confidence,
+          source: m.source,
+        });
+
+        await (this.memorySearch as { add: (item: unknown) => Promise<void> }).add(item);
+        added.push(`[${m.type}] ${m.content}`);
+      }
+
+      if (added.length > 0) {
+        logger.info("[MAPLE:Learning] LLM 提取记忆 %d 条: %s", added.length, added.join(", "));
+      }
+    } catch (e) {
+      logger.warn("[MAPLE:Learning] LLM 记忆提取失败: %s", String(e));
+    }
+  }
+
+  /**
+   * 构造给 LLM 的记忆提取 prompt
+   */
+  private buildMemoryExtractionPrompt(dialogue: string): string {
+    return `分析以下对话，提取关于用户的长期记忆，以 JSON 返回。
+
+只提取值得长期记住的信息（身份/明确偏好/习惯/重要事项），不要提取临时信息。
+
+JSON 格式：
+{
+  "memories": [
+    {
+      "type": "identity|preference|habit|event",
+      "content": "简洁描述，例如：用户名字是张三",
+      "confidence": 0.0-1.0,
+      "source": "explicit|inferred"
+    }
+  ]
+}
+
+置信度标准：
+- explicit（用户明确说出）：0.85-0.95
+- inferred（从行为/语境推断）：0.6-0.8
+- 低于 0.6 不要包含
+
+对话历史：
+${dialogue}
+
+只返回 JSON：`;
+  }
+
+  /**
+   * 解析 LLM 返回的记忆提取 JSON
+   */
+  private parseMemoryResponse(content: string): LlmMemoryResult {
+    try {
+      // 提取 JSON 块（LLM 有时会包裹在 markdown 代码块中）
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        logger.debug("[MAPLE:Learning] 记忆响应中未找到 JSON");
+        return { memories: [] };
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as unknown;
+
+      // 类型校验
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        !Array.isArray((parsed as Record<string, unknown>).memories)
+      ) {
+        logger.debug("[MAPLE:Learning] 记忆 JSON 格式不符合预期");
+        return { memories: [] };
+      }
+
+      const raw = parsed as { memories: unknown[] };
+
+      const memories: LlmMemoryRaw[] = (raw.memories as Record<string, unknown>[])
+        .filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === "object" && item !== null
+        )
+        .filter(
+          (item) =>
+            typeof item.type === "string" &&
+            typeof item.content === "string" &&
+            typeof item.confidence === "number" &&
+            typeof item.source === "string"
+        )
+        .map((item) => ({
+          type: item.type as "identity" | "preference" | "habit" | "event",
+          content: item.content as string,
+          confidence: item.confidence as number,
+          source: item.source as "explicit" | "inferred",
+        }));
+
+      return { memories };
+    } catch (e) {
+      logger.debug("[MAPLE:Learning] 解析记忆响应失败: %s", String(e));
+      return { memories: [] };
     }
   }
 

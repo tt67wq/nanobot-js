@@ -194,7 +194,9 @@ export class Config {
     this.maple = parsed.maple;
   }
   // Expands ~ to home directory
+  // 允许环境变量覆盖（主要用于测试隔离）
   get workspacePath(): string {
+    if (process.env.NANOBOT_WORKSPACE) return process.env.NANOBOT_WORKSPACE;
     let workspace = this.agents.defaults.workspace;
     if (workspace.startsWith("~/")) {
       workspace = join(homedir(), workspace.slice(2));

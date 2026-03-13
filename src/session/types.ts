@@ -41,7 +41,14 @@ export interface SessionInfo {
  * Message format for LLM context (role + content only)
  */
 export interface LLMMessage {
-  role: "user" | "assistant" | "system";
+  /** Role of the message sender */
+  role: "user" | "assistant" | "system" | "tool";
+  /** Content of the message */
   content: string;
+  /** Optional tool calls (for assistant messages) */
   toolCalls?: ToolCall[];
+  /** Optional tool call ID (for tool response messages) */
+  toolCallId?: string;
+  /** Optional tool name (for tool response messages) */
+  toolName?: string;
 }
