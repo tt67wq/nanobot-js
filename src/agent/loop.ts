@@ -388,15 +388,20 @@ export class AgentLoop {
     // 保存 tool 消息（如果有的话）
     // messages 数组从第 2 条开始是历史消息（第 0 条是 system）
     const historyMessages = messages.slice(1);
+    console.log('[DEBUG saveSession] messages to save:', historyMessages.map(m => ({role: m.role, hasToolCalls: !!(m as any).tool_calls, hasToolCallId: !!(m as any).toolCallId})));
+    
     for (const msg of historyMessages) {
+      console.log('[DEBUG saveSession] processing:', msg.role, 'tool_calls:', !!(msg as any).tool_calls, 'toolCallId:', !!(msg as any).toolCallId);
       if (msg.role === "tool" && msg.toolCallId) {
+        console.log('[DEBUG saveSession] saving tool message with toolCallId:', msg.toolCallId);
         session.addMessage("tool", msg.content as string, {
           toolCallId: msg.toolCallId,
           toolName: msg.toolName
         });
-      } else if (msg.role === "assistant" && msg.tool_calls) {
+      } else if (msg.role === "assistant" && (msg as any).tool_calls) {
+        console.log('[DEBUG saveSession] saving assistant with tool_calls:', JSON.stringify((msg as any).tool_calls));
         session.addMessage("assistant", msg.content as string, {
-          toolCalls: msg.tool_calls?.map(tc => ({
+          toolCalls: (msg as any).tool_calls?.map((tc: any) => ({
             id: tc.id,
             name: tc.function.name,
             arguments: typeof tc.function.arguments === 'string' 
