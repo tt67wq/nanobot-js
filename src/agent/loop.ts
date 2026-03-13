@@ -263,10 +263,30 @@ export class AgentLoop {
           }
           return true;
         })
-        .map(m => ({
-          role: m.role as "user" | "assistant" | "system",
-          content: m.content
-        })),
+        .map(m => {
+          // 保留所有角色类型，特别是 tool 角色的 toolCallId 和 toolName
+          const msg: Message = {
+            role: m.role as "user" | "assistant" | "system" | "tool",
+            content: m.content,
+          };
+          // 保留 tool 消息的关键字段
+          if (m.role === "tool") {
+            if (m.toolCallId) msg.toolCallId = m.toolCallId;
+            if (m.toolName) msg.toolName = m.toolName;
+          }
+          // 保留 assistant 消息的 toolCalls
+          if (m.role === "assistant" && m.toolCalls) {
+            msg.tool_calls = m.toolCalls.map(tc => ({
+              id: tc.id,
+              type: "function",
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments)
+              }
+            }));
+          }
+          return msg;
+        }),
       {
         role: "user",
         content: userContent
