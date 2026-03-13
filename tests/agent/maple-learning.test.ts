@@ -6,7 +6,6 @@
  * 运行方式：
  * - 使用 Anthropic: ANTHROPIC_API_KEY=xxx bun test tests/agent/maple-learning.test.ts
  * - 使用 OpenAI: OPENAI_API_KEY=xxx bun test tests/agent/maple-learning.test.ts
- * - 使用 Kimi: OPENAI_API_KEY=xxx OPENAI_BASE_URL=https://api.moonshot.cn/v1 OPENAI_MODEL=moonshot-v1-8k bun test tests/agent/maple-learning.test.ts
  */
 import { describe, it, expect, beforeAll } from "bun:test";
 import { OpenAIProvider } from "../../src/providers/openai";
@@ -57,7 +56,7 @@ describe.skipIf(!ANTHROPIC_KEY && !OPENAI_KEY)("MAPLE Learning Agent E2E Tests",
   let providerName: string;
 
   beforeAll(() => {
-    // 优先使用 OpenAI（便于测试 Kimi 等 OpenAI 兼容 API），其次 Anthropic
+    // 优先使用 OpenAI（便于测试 OpenAI 兼容 API），其次 Anthropic
     if (OPENAI_KEY) {
       providerName = OPENAI_BASE ? `OpenAI (base: ${OPENAI_BASE}, model: ${OPENAI_MODEL || 'default'})` : "OpenAI";
       console.log(`[E2E] 使用 ${providerName} Provider`);

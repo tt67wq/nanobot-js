@@ -7,7 +7,6 @@
 import { Config } from "../config/index";
 import { AnthropicProvider } from "./anthropic";
 import { OpenAIProvider } from "./openai";
-import { KimiProvider } from "./kimi";
 import {
   ChatOptions,
   LLMProvider,
@@ -32,21 +31,15 @@ export { LLMProvider } from "./base";
 // Re-export concrete providers
 export { AnthropicProvider } from "./anthropic";
 export { OpenAIProvider } from "./openai";
-export { KimiProvider } from "./kimi";
 
 /**
  * Determine provider type based on model name.
  *
- * @param model - Model identifier (e.g., "anthropic/claude-opus-4-5", "claude-sonnet-4-20250514", "gpt-4o", "kimi-k2.5")
- * @returns Provider type: "anthropic", "openai", or "kimi"
+ * @param model - Model identifier (e.g., "anthropic/claude-opus-4-5", "claude-sonnet-4-20250514", "gpt-4o")
+ * @returns Provider type: "anthropic" or "openai"
  */
-function getProviderType(model: string): "anthropic" | "openai" | "kimi" {
+function getProviderType(model: string): "anthropic" | "openai" {
   const lowerModel = model.toLowerCase();
-
-  // Kimi models: contain "kimi" in the name
-  if (lowerModel.includes("kimi")) {
-    return "kimi";
-  }
 
   // Anthropic models: start with "anthropic/" or "claude-"
   if (lowerModel.startsWith("anthropic/") || lowerModel.startsWith("claude-")) {
@@ -79,13 +72,6 @@ export function createProvider(config: Config): LLMProvider {
     const apiKey = config.providers.anthropic.api_key || null;
     const apiBase = config.providers.anthropic.api_base || null;
     return new AnthropicProvider(apiKey, apiBase);
-  }
-
-  if (providerType === "kimi") {
-    const apiKey = config.providers.anthropic.api_key || null;
-    const apiBase = config.providers.anthropic.api_base || null;
-    // Kimi uses Bearer auth by default with Anthropic-compatible endpoint
-    return new KimiProvider(apiKey, apiBase, "bearer");
   }
 
   // OpenAI or compatible (default)
