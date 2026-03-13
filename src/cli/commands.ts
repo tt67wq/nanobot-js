@@ -17,6 +17,7 @@ import { CronService } from "../cron/service";
 import { HeartbeatService } from "../heartbeat/service";
 import { AnthropicProvider } from "../providers/anthropic";
 import { OpenAIProvider } from "../providers/openai";
+import { KimiProvider } from "../providers/kimi";
 import { configureGlobalLogger } from "../utils/logger";
 import chalk from "chalk";
 
@@ -736,7 +737,6 @@ function createProvider(config: ReturnType<typeof loadConfig>) {
   
   // Kimi 模型
   if (lowerModel.includes("kimi") && anthropicKey) {
-    const { KimiProvider } = require('../providers/kimi');
     return new KimiProvider(anthropicKey, anthropicBase ?? null, "bearer");
   }
   
