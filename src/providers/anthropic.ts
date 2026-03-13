@@ -215,6 +215,13 @@ export class AnthropicProvider extends LLMProvider {
   private _convertMessages(messages: ChatOptions["messages"]): AnthropicMessage[] {
     const anthropicMessages: AnthropicMessage[] = [];
 
+    logger.debug('[DEBUG] _convertMessages received %d messages', messages.length);
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      logger.debug('[DEBUG] Message %d: role=%s, hasToolCallId=%s, hasToolCalls=%s', 
+        i, msg.role, !!msg.toolCallId, !!(msg as any).toolCalls?.length);
+    }
+
     for (const msg of messages) {
       const role = msg.role;
       const content = msg.content;
