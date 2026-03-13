@@ -729,7 +729,18 @@ function createProvider(config: ReturnType<typeof loadConfig>) {
   const openaiKey = openai?.apiKey || openai?.api_key;
   const anthropicBase = anthropic?.apiBase || anthropic?.api_base;
   const openaiBase = openai?.apiBase || openai?.api_base;
+  const model = config.agents.defaults.model;
 
+  // 根据模型名选择 provider
+  const lowerModel = model.toLowerCase();
+  
+  // Kimi 模型
+  if (lowerModel.includes("kimi") && anthropicKey) {
+    const { KimiProvider } = require('../providers/kimi');
+    return new KimiProvider(anthropicKey, anthropicBase ?? null, "bearer");
+  }
+  
+  // Anthropic 模型
   if (anthropicKey) {
     return new AnthropicProvider(anthropicKey, anthropicBase ?? null);
   } else if (openaiKey) {
