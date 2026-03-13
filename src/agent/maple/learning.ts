@@ -100,28 +100,14 @@ export class LearningAgent {
         return;
       }
 
-      console.log('[DEBUG Maple] 消息数:', messages.length);
-      
-      // 检查消息内容
-      const hasToolRole = messages.some(m => m.role === 'tool');
-      const hasToolCalls = messages.some(m => !!(m as any).toolCalls);
-      console.log('[DEBUG Maple] 消息中有 tool 角色:', hasToolRole, '有 toolCalls:', hasToolCalls);
-
-      console.log('[DEBUG Maple] extractWithRules 前');
       await this.extractWithRules(messages);
-      console.log('[DEBUG Maple] extractWithRules 后');
 
       if (this.useLlm) {
-        console.log('[DEBUG Maple] analyzeWithLlm 前');
         await this.analyzeWithLlm(userId, messages);
-        console.log('[DEBUG Maple] analyzeWithLlm 后');
-
         await this.extractMemoryWithLlm(messages);
       }
-      
-      console.log('[DEBUG Maple] 完成');
     } catch (e) {
-      console.log('[DEBUG Maple] 错误:', String(e));
+      logger.warn('[MAPLE:Learning] 处理失败: %s', String(e));
     }
   }
 

@@ -59,9 +59,30 @@ export class Session {
    * @returns Array of messages in LLM format
    */
   getHistory(maxMessages: number = 50): LLMMessage[] {
-    const recent = this.messages.length > maxMessages
+    let recent = this.messages.length > maxMessages
       ? this.messages.slice(-maxMessages)
       : this.messages;
+
+    // Fix: 如果最近的消息是 tool 角色，确保包含其对应的 tool_use (assistant 消息)
+    // Anthropic API 要求 tool_result 必须有对应的 tool_use
+    if (recent.length > 0 && recent.length < this.messages.length) {
+      const firstMsg = recent[0];
+      if (firstMsg.role === "tool" && firstMsg.toolCallId) {
+        // 往前查找对应的 assistant 消息 (包含 tool_use)
+        const startIndex = this.messages.length - recent.length;
+        for (let i = startIndex - 1; i >= 0; i--) {
+          const msg = this.messages[i];
+          if (msg.role === "assistant" && msg.toolCalls) {
+            const hasMatchingToolCall = msg.toolCalls.some(tc => tc.id === firstMsg.toolCallId);
+            if (hasMatchingToolCall) {
+              // 包含这个 assistant 消息
+              recent = [msg, ...recent];
+              break;
+            }
+          }
+        }
+      }
+    }
 
     // Convert to LLM format, preserving tool role and metadata
     return recent.map((m) => {

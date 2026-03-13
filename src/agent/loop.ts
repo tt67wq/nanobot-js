@@ -377,27 +377,40 @@ export class AgentLoop {
     
     // Save session - 保存所有消息，包括 tool 消息
     session.addMessage("user", content);
-    session.addMessage("assistant", finalContent ?? "");
     
-    // 保存 tool 消息和 assistant 的 tool_calls
+    // 保存 tool 消息和 assistant 消息（包括带 tool_calls 的）
     const historyMessages = messages.slice(1);
+    let hasSavedFinalAssistant = false;
+    
     for (const msg of historyMessages) {
       if (msg.role === "tool" && (msg as any).toolCallId) {
         session.addMessage("tool", msg.content as string, {
           toolCallId: (msg as any).toolCallId,
           toolName: (msg as any).toolName
         });
-      } else if (msg.role === "assistant" && (msg as any).tool_calls) {
-        session.addMessage("assistant", msg.content as string, {
-          toolCalls: (msg as any).tool_calls?.map((tc: any) => ({
-            id: tc.id,
-            name: tc.function.name,
-            arguments: typeof tc.function.arguments === 'string' 
-              ? JSON.parse(tc.function.arguments) 
-              : tc.function.arguments
-          }))
-        });
+      } else if (msg.role === "assistant") {
+        // 检查是否是带有 tool_calls 的 assistant 消息
+        if ((msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
+          session.addMessage("assistant", msg.content as string, {
+            toolCalls: (msg as any).tool_calls?.map((tc: any) => ({
+              id: tc.id,
+              name: tc.function.name,
+              arguments: typeof tc.function.arguments === 'string' 
+                ? JSON.parse(tc.function.arguments) 
+                : tc.function.arguments
+            }))
+          });
+        } else if (!hasSavedFinalAssistant) {
+          // 这是最终的 assistant 消息（不带 tool_calls）
+          session.addMessage("assistant", msg.content as string);
+          hasSavedFinalAssistant = true;
+        }
       }
+    }
+    
+    // 如果循环中没有保存任何 assistant 消息（异常情况），保存 finalContent
+    if (!hasSavedFinalAssistant && finalContent) {
+      session.addMessage("assistant", finalContent);
     }
     
     this.sessions.save(session);

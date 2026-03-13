@@ -20,6 +20,8 @@ export interface LLMResponse {
   finishReason: string;
   /** Token usage statistics */
   usage: Record<string, number>;
+  /** Thinking/reasoning content when thinking is enabled */
+  reasoningContent?: string;
 }
 
 /**
@@ -49,6 +51,8 @@ export interface Message {
       arguments: string;
     };
   }>;
+  /** Optional reasoning content when thinking is enabled (for assistant messages) */
+  reasoning_content?: string;
 }
 
 
