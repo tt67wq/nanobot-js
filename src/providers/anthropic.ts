@@ -6,6 +6,9 @@
 
 import type { ChatOptions, LLMResponse, Tool, ToolDefinition, ToolCallRequest } from "./base";
 import { LLMProvider } from "./base";
+import { Logger } from "../utils/logger";
+
+const logger = new Logger({ module: "AnthropicProvider" });
 
 /**
  * Anthropic API endpoint
@@ -220,6 +223,7 @@ export class AnthropicProvider extends LLMProvider {
 
       // Handle tool result (OpenAI format: role=tool → Anthropic format: role=user with tool_result)
       if (role === "tool" && msg.toolCallId) {
+        logger.debug('[DEBUG] Converting tool message: toolCallId=%s, toolName=%s', msg.toolCallId, msg.toolName);
         anthropicMessages.push({
           role: "user",
           content: [

@@ -273,6 +273,7 @@ export class AgentLoop {
           if (m.role === "tool") {
             if (m.toolCallId) msg.toolCallId = m.toolCallId;
             if (m.toolName) msg.toolName = m.toolName;
+            logger.debug('[DEBUG] Tool message: role=%s, toolCallId=%s, toolName=%s', msg.role, msg.toolCallId, msg.toolName);
           }
           // 保留 assistant 消息的 toolCalls
           if (m.role === "assistant" && m.toolCalls) {
@@ -284,6 +285,7 @@ export class AgentLoop {
                 arguments: JSON.stringify(tc.arguments)
               }
             }));
+            logger.debug('[DEBUG] Assistant message with tool_calls: %s', JSON.stringify(msg.tool_calls));
           }
           return msg;
         }),
