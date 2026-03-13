@@ -269,6 +269,7 @@ export class AgentLoop {
             role: m.role as "user" | "assistant" | "system" | "tool",
             content: m.content,
           };
+          console.log('[DEBUG map] processing role:', m.role, 'has toolCalls:', !!(m as any).toolCalls);
           // 保留 tool 消息的关键字段
           if (m.role === "tool") {
             if (m.toolCallId) msg.toolCallId = m.toolCallId;
@@ -276,8 +277,9 @@ export class AgentLoop {
             logger.debug('[DEBUG] Tool message: role=%s, toolCallId=%s, toolName=%s', msg.role, msg.toolCallId, msg.toolName);
           }
           // 保留 assistant 消息的 toolCalls
-          if (m.role === "assistant" && m.toolCalls) {
-            msg.tool_calls = m.toolCalls.map(tc => ({
+          if (m.role === "assistant" && (m as any).toolCalls) {
+            console.log('[DEBUG map] assistant has toolCalls, converting...');
+            msg.tool_calls = (m as any).toolCalls.map((tc: any) => ({
               id: tc.id,
               type: "function",
               function: {
