@@ -70,7 +70,11 @@ export class Session {
         if (toolName) msg.toolName = toolName;
       }
       // Preserve tool calls for assistant messages
-      if (m.toolCalls) msg.toolCalls = m.toolCalls;
+      if (m.toolCalls) {
+        msg.toolCalls = m.toolCalls;
+        // DEBUG
+        console.log(`[DEBUG getHistory] assistant message has toolCalls:`, JSON.stringify(m.toolCalls));
+      }
       return msg;
     });
   }
