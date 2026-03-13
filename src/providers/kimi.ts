@@ -10,7 +10,10 @@
  */
 
 import type { ChatOptions, LLMResponse, ToolDefinition } from "./base";
-import { AnthropicProvider, AuthType } from "./anthropic";
+import { AnthropicProvider } from "./anthropic";
+
+// Kimi uses Bearer auth by default
+type AuthType = "x-api-key" | "bearer";
 
 /**
  * Kimi provider extending Anthropic with Kimi-specific fixes.
@@ -91,5 +94,4 @@ export class KimiProvider extends AnthropicProvider {
   }
 }
 
-export { AuthType };
 export default KimiProvider;
