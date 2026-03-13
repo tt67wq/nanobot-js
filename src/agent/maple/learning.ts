@@ -97,44 +97,31 @@ export class LearningAgent {
     try {
       // 消息数不足，不触发 learning
       if (messages.length < this.minMessages) {
-        logger.debug("[MAPLE:Learning] 消息数 %d < 最小阈值 %d，跳过", messages.length, this.minMessages);
         return;
       }
 
-      logger.info("[MAPLE:Learning] 开始处理会话，用户: %s，消息数: %d", userId, messages.length);
+      console.log('[DEBUG Maple] 消息数:', messages.length);
+      
+      // 检查消息内容
+      const hasToolRole = messages.some(m => m.role === 'tool');
+      const hasToolCalls = messages.some(m => !!(m as any).toolCalls);
+      console.log('[DEBUG Maple] 消息中有 tool 角色:', hasToolRole, '有 toolCalls:', hasToolCalls);
 
       console.log('[DEBUG Maple] extractWithRules 前');
-      // 规则层：提取结构化记忆（快速，无 LLM 调用）
       await this.extractWithRules(messages);
       console.log('[DEBUG Maple] extractWithRules 后');
 
-      // LLM 层：深度分析（慢，需要 LLM 调用）
       if (this.useLlm) {
         console.log('[DEBUG Maple] analyzeWithLlm 前');
-        const insights = await this.analyzeWithLlm(userId, messages);
+        await this.analyzeWithLlm(userId, messages);
         console.log('[DEBUG Maple] analyzeWithLlm 后');
-        if (insights.length > 0) {
-          this.persistInsights(userId, insights, messages.length);
-        }
 
-        // LLM 层：结构化记忆提取（新增）
         await this.extractMemoryWithLlm(messages);
       }
-
-      // 更新 sessionCount 和 lastActiveAt
-      this.userStore.update(userId, {
-        dynamic: {
-          lastActiveAt: new Date().toISOString(),
-          currentGoals: [],
-          recentTopics: this.extractRecentTopics(messages),
-        },
-      });
-
-      logger.info("[MAPLE:Learning] 会话处理完成，用户: %s", userId);
+      
+      console.log('[DEBUG Maple] 完成');
     } catch (e) {
-      // 确保不抛出：任何错误只打 warn
       console.log('[DEBUG Maple] 错误:', String(e));
-      logger.warn("[MAPLE:Learning] 处理失败 %s: %s", userId, String(e));
     }
   }
 
