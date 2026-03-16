@@ -12,6 +12,7 @@ export type {
   MemorySearchResult,
   MemoryStats,
   DecayResult,
+  MemoryStoreInterface,
 } from "./types.js";
 
 export {
@@ -20,18 +21,6 @@ export {
   MEMORY_TYPE_LABELS,
   MEMORY_SOURCE_LABELS,
 } from "./types.js";
-
-// 规则引擎
-export { memoryRules, MemoryRules, type RuleMatch } from "./rules.js";
-
-// 提取器
-export {
-  memoryExtractor,
-  MemoryExtractor,
-  type ExtractorConfig,
-  type MemoryStoreInterface,
-  DEFAULT_EXTRACTOR_CONFIG,
-} from "./extractor.js";
 
 // 存储
 export { MemoryStore } from "./store.js";

@@ -2,13 +2,13 @@
  * MAPLE Learning Agent
  * 
  * 在会话结束后异步运行，负责：
- * 1. 规则层：复用现有 MemoryExtractor 快速提取结构化记忆，写入 MemorySearch
- * 2. LLM 层：深度分析会话，提取用户偏好洞察，写入 UserProfile.insights
+ * - LLM 层：深度分析会话，提取用户偏好洞察，写入 UserProfile.insights
+ * - LLM 层：从会话中提取结构化记忆（身份/偏好/习惯/事件）
  * 
  * 设计原则：
  * - 全程 fire-and-forget，绝不阻塞响应路径
  * - 内部捕获所有异常，失败只打 warn 日志
- * - LLM 调用失败不影响规则层结果
+ * - LLM 调用失败不影响主对话流程
  */
 
 import type { LLMProvider } from "../../providers/base.js";
@@ -100,8 +100,6 @@ export class LearningAgent {
         return;
       }
 
-      await this.extractWithRules(messages);
-
       if (this.useLlm) {
         await this.analyzeWithLlm(userId, messages);
         await this.extractMemoryWithLlm(messages);
@@ -112,45 +110,10 @@ export class LearningAgent {
   }
 
   /**
-   * 规则层：遍历用户消息，复用 memoryExtractor 提取结构化记忆
-   */
-  private async extractWithRules(messages: SessionMessage[]): Promise<void> {
-    if (!this.memorySearch) {
-      logger.debug("[MAPLE:Learning] memorySearch 未配置，跳过规则层");
-      return;
-    }
-
-    try {
-      // 动态加载 memoryExtractor（避免循环依赖，与 context.ts 一致的做法）
-      const memoryModule = await import("../memory/index.js");
-      const { memoryExtractor } = memoryModule;
-
-      // 设置存储后端（memorySearch 实现了 MemoryStoreInterface 的全部方法）
-      memoryExtractor.setStore(this.memorySearch as unknown as import("../memory/extractor.js").MemoryStoreInterface);
-
-      // 只处理用户消息（role === "user"）
-      const userMessages = messages.filter((m) => m.role === "user");
-      let totalExtracted = 0;
-
-      for (const msg of userMessages) {
-        if (!msg.content || typeof msg.content !== "string") continue;
-        const items = await memoryExtractor.extractAndStore(msg.content);
-        totalExtracted += items.length;
-      }
-
-      if (totalExtracted > 0) {
-        logger.info("[MAPLE:Learning] 规则层提取了 %d 条记忆", totalExtracted);
-      }
-    } catch (e) {
-      logger.warn("[MAPLE:Learning] 规则层提取失败: %s", String(e));
-    }
-  }
-
-  /**
    * LLM 层：用 LLM 从会话中提取结构化记忆（异步，非阻塞）
    * 
-   * 与规则层的区别：
-   * - 规则层只能识别显式表达（"我叫/我喜欢/记得"）
+   * 与传统规则匹配的区别：
+   * - 传统规则只能识别显式表达（"我叫/我喜欢/记得"）
    * - LLM 能推断隐式偏好（从对话中推断用户兴趣/习惯）
    */
   private async extractMemoryWithLlm(messages: SessionMessage[]): Promise<void> {

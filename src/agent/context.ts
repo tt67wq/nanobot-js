@@ -97,35 +97,6 @@ class ContextBuilder {
   }
 
   /**
-   * 从用户消息中提取并存储记忆
-   */
-  async extractMemoryFromMessage(text: string): Promise<void> {
-    if (!this.memorySearch) {
-      return;
-    }
-
-    try {
-      const memory = await getMemorySearch();
-      const { memoryExtractor } = memory;
-
-      // 设置存储后端
-      memoryExtractor.setStore(this.memorySearch as any);
-
-      // 提取并存储记忆
-      const items = await memoryExtractor.extractAndStore(text);
-      if (items.length > 0) {
-        logger.info("[记忆] 已保存 %d 条记忆到存储", items.length);
-        for (const item of items) {
-          logger.info("[记忆] - [%s] %s (置信度: %.0f%%)", 
-            item.type, item.content, item.confidence * 100);
-        }
-      }
-    } catch (error) {
-      logger.error("Failed to extract memory: %s", String(error));
-    }
-  }
-
-  /**
    * 检索相关记忆
    */
   async searchMemory(query: string, limit: number = 5): Promise<string> {

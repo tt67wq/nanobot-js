@@ -231,9 +231,6 @@ export class AgentLoop {
       mapleContext = await this.personalizationAgent.buildContext(sessionKey, memoryContent);
     }
 
-    // 提取并存储用户消息中的记忆（使用原始消息）
-    await this.context.extractMemoryFromMessage(memoryContent);
-
     // 检索相关记忆（使用原始消息）
     const relevantMemory = await this.context.searchMemory(memoryContent);
 

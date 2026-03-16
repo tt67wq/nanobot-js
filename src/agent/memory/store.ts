@@ -5,8 +5,7 @@
 
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { MemoryItem, MemoryType, MemoryStats } from "./types.js";
-import type { MemoryStoreInterface } from "./extractor.js";
+import type { MemoryItem, MemoryType, MemoryStats, MemoryStoreInterface } from "./types.js";
 import { Logger } from "../../utils/logger.js";
 
 const logger = new Logger({ module: "MemoryStore" });
