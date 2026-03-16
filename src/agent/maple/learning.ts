@@ -15,6 +15,7 @@ import type { LLMProvider } from "../../providers/base.js";
 import type { SessionMessage } from "../../session/types.js";
 import type { UserStore } from "./user-store.js";
 import { type Insight, generateInsightId } from "./types.js";
+import { type CleanerConfig, ProfileCleaner } from "./cleaner.js";
 import { Logger } from "../../utils/logger.js";
 
 const logger = new Logger({ module: "MAPLE:Learning" });
@@ -60,6 +61,7 @@ export class LearningAgent {
   private readonly model: string;
   private readonly minMessages: number;
   private readonly useLlm: boolean;
+  private readonly cleaner: ProfileCleaner;
 
   /**
    * @param memorySearch  ContextBuilder.memorySearch（可为 null，此时跳过规则层）
@@ -68,6 +70,7 @@ export class LearningAgent {
    * @param model         使用的模型名称（空字符串 = 使用 provider 默认模型）
    * @param minMessages   触发 learning 的最小消息数
    * @param useLlm        是否启用 LLM 深度分析
+   * @param cleanerConfig 清理配置（可选，默认启用清理）
    */
   constructor(
     memorySearch: unknown,
@@ -76,6 +79,7 @@ export class LearningAgent {
     model: string,
     minMessages: number,
     useLlm: boolean,
+    cleanerConfig?: Partial<CleanerConfig>,
   ) {
     this.memorySearch = memorySearch;
     this.provider = provider;
@@ -83,6 +87,7 @@ export class LearningAgent {
     this.model = model || provider.getDefaultModel();
     this.minMessages = minMessages;
     this.useLlm = useLlm;
+    this.cleaner = new ProfileCleaner(cleanerConfig);
   }
 
   /**
@@ -408,6 +413,7 @@ ${dialogue}
 
   /**
    * 将 Insight 追加到用户画像（去重：相同 content 不重复写入）
+   * 写入后自动触发清理
    */
   private persistInsights(
     userId: string,
@@ -437,8 +443,22 @@ ${dialogue}
         updated.insights.length,
         updated.sessionCount,
       );
+
+      // 写入洞察后自动触发清理
+      this.cleanInsights(userId);
     } catch (e) {
       logger.warn("[MAPLE:Learning] 写入洞察失败: %s", String(e));
+    }
+  }
+
+  /**
+   * 清理用户画像的洞察数据
+   */
+  private cleanInsights(userId: string): void {
+    try {
+      this.userStore.clean(userId);
+    } catch (e) {
+      logger.warn("[MAPLE:Learning] 清理洞察失败: %s", String(e));
     }
   }
 

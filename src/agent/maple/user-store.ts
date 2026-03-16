@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { type UserProfile, createDefaultProfile } from "./types.js";
+import { type CleanerConfig, ProfileCleaner } from "./cleaner.js";
 import { safeFilename } from "../../utils/helpers.js";
 import { Logger } from "../../utils/logger.js";
 
@@ -99,5 +100,25 @@ export class UserStore {
     };
     this.save(updated);
     return updated;
+  }
+
+  /**
+   * 清理用户画像的洞察数据
+   *
+   * @param userId 用户 ID
+   * @param config 清理配置（可选，默认值）
+   * @returns 清理后的 UserProfile
+   */
+  clean(userId: string, config?: Partial<CleanerConfig>): UserProfile {
+    const profile = this.load(userId);
+    const cleaner = new ProfileCleaner(config);
+    const cleaned = cleaner.clean(profile);
+
+    // 如果有变化，保存到磁盘
+    if (cleaned !== profile) {
+      this.save(cleaned);
+    }
+
+    return cleaned;
   }
 }
