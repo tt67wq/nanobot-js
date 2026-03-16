@@ -2,19 +2,20 @@
  * MAPLE Learning Agent
  * 
  * 在会话结束后异步运行，负责：
- * 1. 规则层：复用现有 MemoryExtractor 快速提取结构化记忆，写入 MemorySearch
- * 2. LLM 层：深度分析会话，提取用户偏好洞察，写入 UserProfile.insights
+ * - LLM 层：深度分析会话，提取用户偏好洞察，写入 UserProfile.insights
+ * - LLM 层：从会话中提取结构化记忆（身份/偏好/习惯/事件）
  * 
  * 设计原则：
  * - 全程 fire-and-forget，绝不阻塞响应路径
  * - 内部捕获所有异常，失败只打 warn 日志
- * - LLM 调用失败不影响规则层结果
+ * - LLM 调用失败不影响主对话流程
  */
 
 import type { LLMProvider } from "../../providers/base.js";
 import type { SessionMessage } from "../../session/types.js";
 import type { UserStore } from "./user-store.js";
 import { type Insight, generateInsightId } from "./types.js";
+import { type CleanerConfig, ProfileCleaner } from "./cleaner.js";
 import { Logger } from "../../utils/logger.js";
 
 const logger = new Logger({ module: "MAPLE:Learning" });
@@ -60,6 +61,7 @@ export class LearningAgent {
   private readonly model: string;
   private readonly minMessages: number;
   private readonly useLlm: boolean;
+  private readonly cleaner: ProfileCleaner;
 
   /**
    * @param memorySearch  ContextBuilder.memorySearch（可为 null，此时跳过规则层）
@@ -68,6 +70,7 @@ export class LearningAgent {
    * @param model         使用的模型名称（空字符串 = 使用 provider 默认模型）
    * @param minMessages   触发 learning 的最小消息数
    * @param useLlm        是否启用 LLM 深度分析
+   * @param cleanerConfig 清理配置（可选，默认启用清理）
    */
   constructor(
     memorySearch: unknown,
@@ -76,6 +79,7 @@ export class LearningAgent {
     model: string,
     minMessages: number,
     useLlm: boolean,
+    cleanerConfig?: Partial<CleanerConfig>,
   ) {
     this.memorySearch = memorySearch;
     this.provider = provider;
@@ -83,6 +87,7 @@ export class LearningAgent {
     this.model = model || provider.getDefaultModel();
     this.minMessages = minMessages;
     this.useLlm = useLlm;
+    this.cleaner = new ProfileCleaner(cleanerConfig);
   }
 
   /**
@@ -97,82 +102,23 @@ export class LearningAgent {
     try {
       // 消息数不足，不触发 learning
       if (messages.length < this.minMessages) {
-        logger.debug("[MAPLE:Learning] 消息数 %d < 最小阈值 %d，跳过", messages.length, this.minMessages);
         return;
       }
 
-      logger.info("[MAPLE:Learning] 开始处理会话，用户: %s，消息数: %d", userId, messages.length);
-
-      // 规则层：提取结构化记忆（快速，无 LLM 调用）
-      await this.extractWithRules(messages);
-
-      // LLM 层：深度分析（慢，需要 LLM 调用）
       if (this.useLlm) {
-        const insights = await this.analyzeWithLlm(userId, messages);
-        if (insights.length > 0) {
-          this.persistInsights(userId, insights, messages.length);
-        }
-
-        // LLM 层：结构化记忆提取（新增）
+        await this.analyzeWithLlm(userId, messages);
         await this.extractMemoryWithLlm(messages);
       }
-
-      // 更新 sessionCount 和 lastActiveAt
-      this.userStore.update(userId, {
-        dynamic: {
-          lastActiveAt: new Date().toISOString(),
-          currentGoals: [],
-          recentTopics: this.extractRecentTopics(messages),
-        },
-      });
-
-      logger.info("[MAPLE:Learning] 会话处理完成，用户: %s", userId);
     } catch (e) {
-      // 确保不抛出：任何错误只打 warn
-      logger.warn("[MAPLE:Learning] 处理失败 %s: %s", userId, String(e));
-    }
-  }
-
-  /**
-   * 规则层：遍历用户消息，复用 memoryExtractor 提取结构化记忆
-   */
-  private async extractWithRules(messages: SessionMessage[]): Promise<void> {
-    if (!this.memorySearch) {
-      logger.debug("[MAPLE:Learning] memorySearch 未配置，跳过规则层");
-      return;
-    }
-
-    try {
-      // 动态加载 memoryExtractor（避免循环依赖，与 context.ts 一致的做法）
-      const memoryModule = await import("../memory/index.js");
-      const { memoryExtractor } = memoryModule;
-
-      // 设置存储后端（memorySearch 实现了 MemoryStoreInterface 的全部方法）
-      memoryExtractor.setStore(this.memorySearch as unknown as import("../memory/extractor.js").MemoryStoreInterface);
-
-      // 只处理用户消息（role === "user"）
-      const userMessages = messages.filter((m) => m.role === "user");
-      let totalExtracted = 0;
-
-      for (const msg of userMessages) {
-        if (!msg.content || typeof msg.content !== "string") continue;
-        const items = await memoryExtractor.extractAndStore(msg.content);
-        totalExtracted += items.length;
-      }
-
-      if (totalExtracted > 0) {
-        logger.info("[MAPLE:Learning] 规则层提取了 %d 条记忆", totalExtracted);
-      }
-    } catch (e) {
-      logger.warn("[MAPLE:Learning] 规则层提取失败: %s", String(e));
+      logger.warn('[MAPLE:Learning] 处理失败: %s', String(e));
     }
   }
 
   /**
    * LLM 层：用 LLM 从会话中提取结构化记忆（异步，非阻塞）
    * 
-   * 与规则层的区别：
-   * - 规则层只能识别显式表达（"我叫/我喜欢/记得"）
+   * 与传统规则匹配的区别：
+   * - 传统规则只能识别显式表达（"我叫/我喜欢/记得"）
    * - LLM 能推断隐式偏好（从对话中推断用户兴趣/习惯）
    */
   private async extractMemoryWithLlm(messages: SessionMessage[]): Promise<void> {
@@ -467,6 +413,7 @@ ${dialogue}
 
   /**
    * 将 Insight 追加到用户画像（去重：相同 content 不重复写入）
+   * 写入后自动触发清理
    */
   private persistInsights(
     userId: string,
@@ -496,8 +443,22 @@ ${dialogue}
         updated.insights.length,
         updated.sessionCount,
       );
+
+      // 写入洞察后自动触发清理
+      this.cleanInsights(userId);
     } catch (e) {
       logger.warn("[MAPLE:Learning] 写入洞察失败: %s", String(e));
+    }
+  }
+
+  /**
+   * 清理用户画像的洞察数据
+   */
+  private cleanInsights(userId: string): void {
+    try {
+      this.userStore.clean(userId);
+    } catch (e) {
+      logger.warn("[MAPLE:Learning] 清理洞察失败: %s", String(e));
     }
   }
 

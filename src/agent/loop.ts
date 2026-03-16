@@ -8,7 +8,7 @@ import type { InboundMessage, OutboundMessage } from "./types";
 import type { LLMProvider, Message, ChatOptions } from "../providers/base";
 import { SessionManager } from "../session/manager";
 import { ContextCleaner } from "../session/cleanup";
-import type { MapleConfig } from "../config/schema";
+import type { MapleConfig, ContextCleanupConfig } from "../config/schema";
 import { UserStore, LearningAgent, PersonalizationAgent } from "./maple/index";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -44,12 +44,14 @@ export interface AgentLoopOptions {
   thinking?: boolean;
   /** 进度回调函数 - 在工具执行时通知外部 */
   onProgress?: (event: ProgressEvent) => void;
-  /** 是否启用进度事件回调，默认 true */
+  /** 是否启用进度回调，默认 true */
   enableProgress?: boolean;
   /** 消息总线 - 用于 subagent 通知 */
   bus?: MessageBus;
   /** Brave API Key - 用于 subagent 的 web 搜索 */
   braveApiKey?: string;
+  /** Context cleanup 配置 - 透传用户配置 */
+  contextCleanupConfig?: ContextCleanupConfig;
 }
 
 export class AgentLoop {
@@ -129,23 +131,27 @@ export class AgentLoop {
     // 注意：记忆检索系统需要外部调用 setMemorySearch 后才会初始化
     // 在 commands.ts 中配置
     
-    this._registerDefaultTools();
+    this._registerDefaultTools(options?.contextCleanupConfig);
     
     logger.debug('Created successfully');
     logger.debug('Max iterations: %d', this.maxIterations);
     logger.debug('Thinking enabled: %s', this.thinking);
   }
 
-  private _registerDefaultTools(): void {
-    // Create context cleaner with default config
-    this.contextCleaner = new ContextCleaner({
-      enabled: true,
-      max_tokens: 100000,
-      max_messages: 100,
-      keep_recent: 20,
-      mode: 'smart',
-      compress_model: this.model,
-    }, this.provider, null);
+  private _registerDefaultTools(contextCleanupConfig?: ContextCleanupConfig): void {
+    // 使用传入的配置，缺少字段时用默认值
+    const cleanerConfig = {
+      enabled: contextCleanupConfig?.enabled ?? true,
+      max_tokens: contextCleanupConfig?.max_tokens ?? 100000,
+      max_messages: contextCleanupConfig?.max_messages ?? 100,
+      keep_recent: contextCleanupConfig?.keep_recent ?? 20,
+      mode: contextCleanupConfig?.mode ?? 'smart',
+      compress_model: contextCleanupConfig?.compress_model ?? this.model,
+    };
+    
+    logger.debug('[ContextCleaner] Using config: %s', JSON.stringify(cleanerConfig));
+    
+    this.contextCleaner = new ContextCleaner(cleanerConfig, this.provider, null);
     
     // Register ClearContextTool with callback to get current session
     this.tools.register(new ClearContextTool(
@@ -225,9 +231,6 @@ export class AgentLoop {
       mapleContext = await this.personalizationAgent.buildContext(sessionKey, memoryContent);
     }
 
-    // 提取并存储用户消息中的记忆（使用原始消息）
-    await this.context.extractMemoryFromMessage(memoryContent);
-
     // 检索相关记忆（使用原始消息）
     const relevantMemory = await this.context.searchMemory(memoryContent);
 
@@ -264,25 +267,21 @@ export class AgentLoop {
           return true;
         })
         .map(m => {
-          // 保留所有角色类型，特别是 tool 角色的 toolCallId 和 toolName
           const msg: Message = {
             role: m.role as "user" | "assistant" | "system" | "tool",
             content: m.content,
           };
-          // 保留 tool 消息的关键字段
-          if (m.role === "tool") {
-            if (m.toolCallId) msg.toolCallId = m.toolCallId;
-            if (m.toolName) msg.toolName = m.toolName;
+          // tool 消息保留 toolCallId
+          if (m.role === "tool" && m.toolCallId) {
+            msg.toolCallId = m.toolCallId;
+            msg.toolName = (m as any).toolName;
           }
-          // 保留 assistant 消息的 toolCalls
-          if (m.role === "assistant" && m.toolCalls) {
-            msg.tool_calls = m.toolCalls.map(tc => ({
+          // assistant 消息保留 tool_calls
+          if (m.role === "assistant" && (m as any).toolCalls) {
+            msg.tool_calls = (m as any).toolCalls.map((tc: any) => ({
               id: tc.id,
               type: "function",
-              function: {
-                name: tc.name,
-                arguments: JSON.stringify(tc.arguments)
-              }
+              function: { name: tc.name, arguments: JSON.stringify(tc.arguments) }
             }));
           }
           return msg;
@@ -379,9 +378,44 @@ export class AgentLoop {
       iteration,
     }, callOnProgress);
     
-    // Save session
+    // Save session - 保存所有消息，包括 tool 消息
     session.addMessage("user", content);
-    session.addMessage("assistant", finalContent ?? "");
+    
+    // 保存 tool 消息和 assistant 消息（包括带 tool_calls 的）
+    const historyMessages = messages.slice(1);
+    let hasSavedFinalAssistant = false;
+    
+    for (const msg of historyMessages) {
+      if (msg.role === "tool" && (msg as any).toolCallId) {
+        session.addMessage("tool", msg.content as string, {
+          toolCallId: (msg as any).toolCallId,
+          toolName: (msg as any).toolName
+        });
+      } else if (msg.role === "assistant") {
+        // 检查是否是带有 tool_calls 的 assistant 消息
+        if ((msg as any).tool_calls && (msg as any).tool_calls.length > 0) {
+          session.addMessage("assistant", msg.content as string, {
+            toolCalls: (msg as any).tool_calls?.map((tc: any) => ({
+              id: tc.id,
+              name: tc.function.name,
+              arguments: typeof tc.function.arguments === 'string' 
+                ? JSON.parse(tc.function.arguments) 
+                : tc.function.arguments
+            }))
+          });
+        } else if (!hasSavedFinalAssistant) {
+          // 这是最终的 assistant 消息（不带 tool_calls）
+          session.addMessage("assistant", msg.content as string);
+          hasSavedFinalAssistant = true;
+        }
+      }
+    }
+    
+    // 如果循环中没有保存任何 assistant 消息（异常情况），保存 finalContent
+    if (!hasSavedFinalAssistant && finalContent) {
+      session.addMessage("assistant", finalContent);
+    }
+    
     this.sessions.save(session);
 
     // MAPLE Learning：fire-and-forget，不阻塞响应路径

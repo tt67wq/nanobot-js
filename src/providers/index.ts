@@ -36,7 +36,7 @@ export { OpenAIProvider } from "./openai";
  * Determine provider type based on model name.
  *
  * @param model - Model identifier (e.g., "anthropic/claude-opus-4-5", "claude-sonnet-4-20250514", "gpt-4o")
- * @returns "anthropic" for Anthropic/Claude models, "openai" for others
+ * @returns Provider type: "anthropic" or "openai"
  */
 function getProviderType(model: string): "anthropic" | "openai" {
   const lowerModel = model.toLowerCase();

@@ -94,3 +94,14 @@ export const MEMORY_SOURCE_LABELS: Record<MemorySource, string> = {
   explicit: "明确",
   inferred: "推断",
 };
+
+// 记忆存储接口（由 MemoryStore 和 MemorySearch 实现）
+export interface MemoryStoreInterface {
+  add(item: MemoryItem): Promise<void>;
+  getById(id: string): Promise<MemoryItem | null>;
+  getByType(type: string): Promise<MemoryItem[]>;
+  getAll(): Promise<MemoryItem[]>;
+  update(item: MemoryItem): Promise<void>;
+  delete(id: string): Promise<void>;
+  search(query: string, limit?: number): Promise<MemoryItem[]>;
+}

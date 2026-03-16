@@ -18,3 +18,4 @@ export {
 export { UserStore } from "./user-store.js";
 export { LearningAgent } from "./learning.js";
 export { PersonalizationAgent } from "./personalization.js";
+export { ProfileCleaner, DEFAULT_CLEANER_CONFIG, type CleanerConfig } from "./cleaner.js";

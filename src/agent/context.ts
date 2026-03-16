@@ -97,35 +97,6 @@ class ContextBuilder {
   }
 
   /**
-   * 从用户消息中提取并存储记忆
-   */
-  async extractMemoryFromMessage(text: string): Promise<void> {
-    if (!this.memorySearch) {
-      return;
-    }
-
-    try {
-      const memory = await getMemorySearch();
-      const { memoryExtractor } = memory;
-
-      // 设置存储后端
-      memoryExtractor.setStore(this.memorySearch as any);
-
-      // 提取并存储记忆
-      const items = await memoryExtractor.extractAndStore(text);
-      if (items.length > 0) {
-        logger.info("[记忆] 已保存 %d 条记忆到存储", items.length);
-        for (const item of items) {
-          logger.info("[记忆] - [%s] %s (置信度: %.0f%%)", 
-            item.type, item.content, item.confidence * 100);
-        }
-      }
-    } catch (error) {
-      logger.error("Failed to extract memory: %s", String(error));
-    }
-  }
-
-  /**
    * 检索相关记忆
    */
   async searchMemory(query: string, limit: number = 5): Promise<string> {
@@ -274,9 +245,32 @@ Your workspace is at: ${workspacePath}
 - Anything you'd want to know if you forgot this conversation
 
 ### When to compress context (call clear_context)
-- Conversation exceeds ~30 turns
-- You notice repetitive context being sent to LLM
-- Task is complete and worth summarizing before moving on
+
+Use clear_context proactively — don't wait for context to overflow.
+Good moments to compact:
+
+**At task boundaries:**
+- User signals moving on to a new, unrelated task
+- You have finished a deliverable and the user acknowledges it
+
+**After extracting results from large context:**
+- You have obtained a fact, conclusion, or summary by consuming many messages
+- A research or investigation phase is complete
+
+**Before consuming large new context:**
+- You are about to read many files or a large codebase
+- You are about to generate a long document or plan
+
+**Before a complex multi-step process:**
+- You have a plan and are about to start executing it
+- You are about to begin a refactor, migration, or multi-file edit
+
+**When prior context is superseded:**
+- New requirements invalidate previous discussion
+- Many dead-ends or tangents can be condensed to a summary
+
+Be conservative: only compact when context is clearly losing relevance.
+Recent tool results and the current task are always preserved.
 
 ### Memory Format
 Write in **bullet points** for easy scanning:
@@ -291,7 +285,7 @@ Write in **bullet points** for easy scanning:
 - **shell** → Use for git, build commands, system operations
 - **web** → Use for current info, research, fact-checking
 - **message** → ONLY when explicitly sending to external channels
-- **clear_context** → Proactively when context grows large
+- **clear_context** → At task boundaries, after synthesizing results, before complex multi-step work
 - **spawn** → Use for parallel independent tasks
 
 ### Error Handling

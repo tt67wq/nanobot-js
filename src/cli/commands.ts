@@ -109,6 +109,7 @@ agentCmd
       enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
+      contextCleanupConfig: config.contextCleanup,
     });
 
     // 配置并初始化记忆检索系统
@@ -242,6 +243,7 @@ gatewayCmd
       enableProgress: config.agents.defaults.progress_events,
       bus,
       braveApiKey: config.tools?.web?.search?.api_key,
+      contextCleanupConfig: config.contextCleanup,
     });
 
     // 配置并初始化记忆检索系统
@@ -729,7 +731,12 @@ function createProvider(config: ReturnType<typeof loadConfig>) {
   const openaiKey = openai?.apiKey || openai?.api_key;
   const anthropicBase = anthropic?.apiBase || anthropic?.api_base;
   const openaiBase = openai?.apiBase || openai?.api_base;
+  const model = config.agents.defaults.model;
 
+  // 根据模型名选择 provider
+  const lowerModel = model.toLowerCase();
+  
+  // Anthropic 模型
   if (anthropicKey) {
     return new AnthropicProvider(anthropicKey, anthropicBase ?? null);
   } else if (openaiKey) {

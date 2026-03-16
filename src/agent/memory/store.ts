@@ -5,11 +5,16 @@
 
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { MemoryItem, MemoryType, MemoryStats } from "./types.js";
-import type { MemoryStoreInterface } from "./extractor.js";
+import type { MemoryItem, MemoryType, MemoryStats, MemoryStoreInterface } from "./types.js";
 import { Logger } from "../../utils/logger.js";
+import { MemoryDecay } from "./decay.js";
 
 const logger = new Logger({ module: "MemoryStore" });
+
+// 清理触发配置
+const CLEANUP_TRIGGER_PROBABILITY = 0.1; // 10% 概率触发
+const CLEANUP_TRIGGER_INTERVAL = 60 * 1000; // 至少间隔 1 分钟
+const CLEANUP_TRIGGER_COUNT = 10; // 每添加 10 次触发一次
 
 // 存储文件名映射
 const MEMORY_FILES: Record<MemoryType, string> = {
@@ -26,9 +31,13 @@ const MEMORY_FILES: Record<MemoryType, string> = {
 export class MemoryStore implements MemoryStoreInterface {
   private memoryDir: string;
   private items: Map<string, MemoryItem> = new Map();
+  private lastCleanupAt: number = 0; // 上次清理时间
+  private addCountSinceCleanup: number = 0; // 自上次清理后的添加次数
+  private decay: MemoryDecay;
 
   constructor(workspace: string) {
     this.memoryDir = join(workspace, "memory", "structured");
+    this.decay = new MemoryDecay();
     this.ensureDir();
     this.loadAll();
   }
@@ -121,6 +130,16 @@ export class MemoryStore implements MemoryStoreInterface {
     this.items.set(item.id, item);
     this.saveByType(item.type);
     logger.debug("Added memory: %s (%s)", item.id, item.type);
+
+    // 增加添加计数并检查是否触发清理
+    this.incrementAddCount();
+    if (this.shouldTriggerCleanup()) {
+      // 异步触发清理，不阻塞添加操作
+      this.cleanup().then(() => this.resetCleanupTrigger()).catch((err) => {
+        logger.error("Cleanup failed: %s", String(err));
+        this.resetCleanupTrigger(); // 即使失败也重置，避免无限重试
+      });
+    }
   }
 
   /**
@@ -245,6 +264,78 @@ export class MemoryStore implements MemoryStoreInterface {
     }
 
     return deleted;
+  }
+
+  /**
+   * 清理过期/低价值记忆
+   * @returns 清理的记忆数量
+   */
+  async cleanup(): Promise<number> {
+    const items = Array.from(this.items.values());
+    const result = this.decay.checkDecay(items);
+
+    if (result.items.length > 0) {
+      const idsToDelete = result.items.map((item) => item.id);
+      const deletedCount = await this.deleteMany(idsToDelete);
+      logger.info("Memory cleanup: removed %d items (checked %d total)", deletedCount, items.length);
+      return deletedCount;
+    }
+
+    logger.debug("Memory cleanup: no items to remove (checked %d total)", items.length);
+    return 0;
+  }
+
+  /**
+   * 检查是否应该触发清理
+   */
+  private shouldTriggerCleanup(): boolean {
+    const now = Date.now();
+
+    // 检查时间间隔
+    if (now - this.lastCleanupAt < CLEANUP_TRIGGER_INTERVAL) {
+      return false;
+    }
+
+    // 计数触发：每添加 N 次清理一次
+    if (this.addCountSinceCleanup >= CLEANUP_TRIGGER_COUNT) {
+      return true;
+    }
+
+    // 概率触发：10% 概率
+    if (Math.random() < CLEANUP_TRIGGER_PROBABILITY) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 重置清理触发计数
+   */
+  private resetCleanupTrigger(): void {
+    this.lastCleanupAt = Date.now();
+    this.addCountSinceCleanup = 0;
+  }
+
+  /**
+   * 增加添加计数
+   */
+  private incrementAddCount(): void {
+    this.addCountSinceCleanup++;
+  }
+
+  /**
+   * 获取衰减统计信息
+   */
+  async getDecayStats(): Promise<{
+    total: number;
+    toDecay: number;
+    byType: Record<MemoryType, number>;
+    oldestItem: Date | null;
+    newestItem: Date | null;
+  }> {
+    const items = Array.from(this.items.values());
+    return this.decay.getDecayStats(items);
   }
 
   /**
